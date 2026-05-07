@@ -1,5 +1,7 @@
-.env
 
 # dependencies
-node_modul
+node_modules/
+
+# dotenv environment variables
+.env
 
