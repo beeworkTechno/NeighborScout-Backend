@@ -32,6 +32,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+
+    role: {
+      type: String,
+      enum: ['personal', 'business'],
+      default: 'personal',
+    },
   },
   {
     timestamps: true,

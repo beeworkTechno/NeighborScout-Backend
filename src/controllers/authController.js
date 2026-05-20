@@ -7,10 +7,16 @@ const User = require('../models/User');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Generate JWT
-const generateToken = (id) => {
+const generateToken = (id, role) => {
+  const jwtSecret = process.env.JWT_SECRET;
+
+  if (!jwtSecret) {
+    throw new Error('Missing JWT_SECRET environment variable. Add it to your .env file or environment settings.');
+  }
+
   return jwt.sign(
-    { id },
-    process.env.JWT_SECRET,
+    { id, role },
+    jwtSecret,
     { expiresIn: '30d' }
   );
 };
@@ -27,7 +33,7 @@ const register = async (req, res) => {
     });
   }
 
-  const { name, email, password } = req.body;
+  const { name, email, password, role = 'personal' } = req.body;
 
   try {
     // Check if user exists
@@ -44,6 +50,7 @@ const register = async (req, res) => {
       name,
       email,
       password,
+      role,
     });
 
     res.status(201).json({
@@ -51,9 +58,9 @@ const register = async (req, res) => {
       name: user.name,
       email: user.email,
       avatar: user.avatar,
-      token: generateToken(user._id),
+      role: user.role,
+      token: generateToken(user._id, user.role),
     });
-
   } catch (error) {
     res.status(500).json({
       message: error.message,
@@ -79,29 +86,23 @@ const login = async (req, res) => {
     const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
-
       res.json({
         _id: user._id,
         name: user.name,
         email: user.email,
         avatar: user.avatar,
-        token: generateToken(user._id),
+        role: user.role,
+        token: generateToken(user._id, user.role),
       });
-
     } else {
-
       res.status(401).json({
         message: 'Invalid email or password',
       });
-
     }
-
   } catch (error) {
-
     res.status(500).json({
       message: error.message,
     });
-
   }
 };
 
@@ -126,12 +127,7 @@ const googleLogin = async (req, res) => {
 
     const payload = ticket.getPayload();
 
-    const {
-      sub,
-      email,
-      name,
-      picture,
-    } = payload;
+    const { sub, email, name, picture } = payload;
 
     // Find existing user
     let user = await User.findOne({ email });
@@ -144,6 +140,7 @@ const googleLogin = async (req, res) => {
         avatar: picture,
         googleId: sub,
         password: '',
+        role: 'personal',
       });
     }
 
@@ -153,17 +150,14 @@ const googleLogin = async (req, res) => {
       name: user.name,
       email: user.email,
       avatar: user.avatar,
-      token: generateToken(user._id),
+      role: user.role,
+      token: generateToken(user._id, user.role),
     });
-
   } catch (error) {
-
     console.log(error);
-
     res.status(500).json({
       message: 'Google login failed',
     });
-
   }
 };
 
@@ -176,6 +170,7 @@ const getMe = async (req, res) => {
     name: req.user.name,
     email: req.user.email,
     avatar: req.user.avatar,
+    role: req.user.role,
   });
 };
 
