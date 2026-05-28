@@ -7,69 +7,86 @@ const businessSchema = new mongoose.Schema(
       required: [true, 'Business name is required'],
       trim: true,
     },
+
     description: {
       type: String,
-      default: '',
+      required: [true, 'Business description is required'],
+      trim: true,
     },
+
     category: {
       type: String,
-      required: [true, 'Category is required'],
-      enum: [
-        'Restaurant',
-        'Cafe',
-        'Shop',
-        'Salon',
-        'Gym',
-        'Pharmacy',
-        'Grocery',
-        'Service',
-        'Other',
-      ],
+      required: [true, 'Business category is required'],
+      trim: true,
     },
+
     address: {
       type: String,
-      required: [true, 'Address is required'],
+      default: 'Address not provided',
+      trim: true,
     },
+
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+
     location: {
       type: {
         type: String,
         enum: ['Point'],
         default: 'Point',
       },
+
       coordinates: {
-        type: [Number], // [longitude, latitude]
-        default: [0, 0],
+        type: [Number],
+        required: [true, 'Business location coordinates are required'],
+        validate: {
+          validator: function (value) {
+            return (
+              Array.isArray(value) &&
+              value.length === 2 &&
+              typeof value[0] === 'number' &&
+              typeof value[1] === 'number' &&
+              value[0] >= -180 &&
+              value[0] <= 180 &&
+              value[1] >= -90 &&
+              value[1] <= 90
+            );
+          },
+          message:
+            'Location coordinates must be valid [longitude, latitude] numbers.',
+        },
       },
     },
-    phone: {
-      type: String,
-      default: '',
-    },
-    photos: [
-      {
-        type: String,
-      },
-    ],
+
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
     },
+
     averageRating: {
       type: Number,
       default: 0,
       min: 0,
       max: 5,
     },
+
     reviewCount: {
       type: Number,
       default: 0,
+      min: 0,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-// Index for geo queries
-businessSchema.index({ location: '2dsphere' });
+businessSchema.index({
+  location: '2dsphere',
+});
 
 module.exports = mongoose.model('Business', businessSchema);

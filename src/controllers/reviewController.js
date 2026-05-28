@@ -1,92 +1,225 @@
 const Review = require('../models/Review');
 const Business = require('../models/Business');
 
+// Clean review data before sending to frontend
+const formatReviewResponse = (review) => {
+  return {
+    _id: review._id,
+    business: review.business,
+    pseudoName: review.pseudoName || 'Anonymous Neighbor',
+    rating: review.rating,
+    comment: review.comment,
+    createdAt: review.createdAt,
+    updatedAt: review.updatedAt,
+  };
+};
+
 // @desc    Get reviews for a business
 // @route   GET /api/reviews/:businessId
 // @access  Public
 const getReviews = async (req, res) => {
   try {
-    const reviews = await Review.find({ business: req.params.businessId })
-      .populate('user', 'name avatar')
-      .sort({ createdAt: -1 });
+    const reviews = await Review.find({
+      business: req.params.businessId,
+    })
+      .sort({
+        createdAt: -1,
+      })
+      .lean();
 
-    res.json(reviews);
+    const safeReviews = reviews.map((review) => ({
+      _id: review._id,
+      business: review.business,
+      pseudoName: review.pseudoName || 'Anonymous Neighbor',
+      rating: review.rating,
+      comment: review.comment,
+      createdAt: review.createdAt,
+      updatedAt: review.updatedAt,
+    }));
+
+    res.json(safeReviews);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.log('Get Reviews Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to load reviews.',
+    });
   }
 };
 
 // @desc    Create a review
 // @route   POST /api/reviews/:businessId
-// @access  Private
+// @access  Private personal users only
 const createReview = async (req, res) => {
   try {
-    const { rating, comment } = req.body;
+    if (req.user.role === 'business') {
+      return res.status(403).json({
+        message:
+          'Business accounts cannot rate or review businesses.',
+      });
+    }
+
+    const {
+      rating,
+      comment,
+    } = req.body;
+
     const businessId = req.params.businessId;
 
-    const business = await Business.findById(businessId);
-    if (!business) return res.status(404).json({ message: 'Business not found' });
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        message: 'Rating must be between 1 and 5.',
+      });
+    }
 
-    // Check if user already reviewed this business
-    const existing = await Review.findOne({ business: businessId, user: req.user._id });
+    const business = await Business.findById(businessId);
+
+    if (!business) {
+      return res.status(404).json({
+        message: 'Business not found.',
+      });
+    }
+
+    const existing = await Review.findOne({
+      business: businessId,
+      user: req.user._id,
+    }).select('+user');
+
     if (existing) {
-      return res.status(400).json({ message: 'You have already reviewed this business' });
+      return res.status(400).json({
+        message:
+          'You have already reviewed this business.',
+      });
     }
 
     const review = await Review.create({
       business: businessId,
       user: req.user._id,
       rating,
-      comment,
+      comment: comment || '',
     });
 
-    const populated = await review.populate('user', 'name avatar');
-    res.status(201).json(populated);
+    res.status(201).json(formatReviewResponse(review));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.log('Create Review Error:', error);
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        message:
+          'You have already reviewed this business.',
+      });
+    }
+
+    res.status(500).json({
+      message: 'Failed to create review.',
+    });
   }
 };
 
 // @desc    Update a review
 // @route   PUT /api/reviews/:id
-// @access  Private (review owner only)
+// @access  Private review owner only, personal users only
 const updateReview = async (req, res) => {
   try {
-    const review = await Review.findById(req.params.id);
-    if (!review) return res.status(404).json({ message: 'Review not found' });
-
-    if (review.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized to update this review' });
+    if (req.user.role === 'business') {
+      return res.status(403).json({
+        message:
+          'Business accounts cannot update reviews or ratings.',
+      });
     }
 
-    const { rating, comment } = req.body;
-    review.rating = rating ?? review.rating;
-    review.comment = comment ?? review.comment;
+    const review = await Review.findById(req.params.id).select('+user');
+
+    if (!review) {
+      return res.status(404).json({
+        message: 'Review not found.',
+      });
+    }
+
+    if (review.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        message:
+          'You can only update your own review.',
+      });
+    }
+
+    const {
+      rating,
+      comment,
+    } = req.body;
+
+    if (rating !== undefined) {
+      if (rating < 1 || rating > 5) {
+        return res.status(400).json({
+          message: 'Rating must be between 1 and 5.',
+        });
+      }
+
+      review.rating = rating;
+    }
+
+    if (comment !== undefined) {
+      review.comment = comment;
+    }
+
     await review.save();
 
-    res.json(review);
+    res.json(formatReviewResponse(review));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.log('Update Review Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to update review.',
+    });
   }
 };
 
 // @desc    Delete a review
 // @route   DELETE /api/reviews/:id
-// @access  Private (review owner only)
+// @access  Private review owner only, personal users only
 const deleteReview = async (req, res) => {
   try {
-    const review = await Review.findById(req.params.id);
-    if (!review) return res.status(404).json({ message: 'Review not found' });
-
-    if (review.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized to delete this review' });
+    if (req.user.role === 'business') {
+      return res.status(403).json({
+        message:
+          'Business accounts cannot delete reviews or ratings.',
+      });
     }
 
-    await Review.findOneAndDelete({ _id: req.params.id });
-    res.json({ message: 'Review removed' });
+    const review = await Review.findById(req.params.id).select('+user');
+
+    if (!review) {
+      return res.status(404).json({
+        message: 'Review not found.',
+      });
+    }
+
+    if (review.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        message:
+          'You can only delete your own review.',
+      });
+    }
+
+    await Review.findOneAndDelete({
+      _id: req.params.id,
+    });
+
+    res.json({
+      message: 'Review removed.',
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.log('Delete Review Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to delete review.',
+    });
   }
 };
 
-module.exports = { getReviews, createReview, updateReview, deleteReview };
+module.exports = {
+  getReviews,
+  createReview,
+  updateReview,
+  deleteReview,
+};

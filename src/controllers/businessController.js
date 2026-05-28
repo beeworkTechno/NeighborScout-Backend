@@ -101,12 +101,12 @@ const getBusiness = async (req, res) => {
 
 // @desc    Create business
 // @route   POST /api/businesses
-// @access  Private
+// @access  Private business users only
 const createBusiness = async (req, res) => {
   try {
     if (req.user.role !== 'business') {
       return res.status(403).json({
-        message: 'Only business users can create business listings.',
+        message: 'Only business accounts can create business listings.',
       });
     }
 
@@ -119,20 +119,49 @@ const createBusiness = async (req, res) => {
       location,
     } = req.body;
 
-    if (!name || !description || !category || !address) {
+    if (!name || !description || !category) {
+      return res.status(400).json({
+        message: 'Name, description, and category are required.',
+      });
+    }
+
+    if (
+      !location ||
+      !Array.isArray(location.coordinates) ||
+      location.coordinates.length !== 2
+    ) {
       return res.status(400).json({
         message:
-          'Name, description, category, and address are required.',
+          'Business location is required. Please provide longitude and latitude.',
+      });
+    }
+
+    const longitude = Number(location.coordinates[0]);
+    const latitude = Number(location.coordinates[1]);
+
+    if (
+      Number.isNaN(latitude) ||
+      Number.isNaN(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return res.status(400).json({
+        message: 'Invalid business location coordinates.',
       });
     }
 
     const business = await Business.create({
-      name,
-      description,
-      category,
-      address,
-      phone,
-      location,
+      name: name.trim(),
+      description: description.trim(),
+      category: category.trim(),
+      address: address?.trim() || 'Address not provided',
+      phone: phone?.trim() || '',
+      location: {
+        type: 'Point',
+        coordinates: [longitude, latitude],
+      },
       owner: req.user._id,
     });
 
@@ -141,7 +170,7 @@ const createBusiness = async (req, res) => {
     console.log('Create Business Error:', error);
 
     res.status(500).json({
-      message: 'Failed to create business.',
+      message: error.message || 'Failed to create business.',
     });
   }
 };
@@ -165,9 +194,56 @@ const updateBusiness = async (req, res) => {
       });
     }
 
+    const updateData = {
+      ...req.body,
+    };
+
+    if (updateData.name) {
+      updateData.name = updateData.name.trim();
+    }
+
+    if (updateData.description) {
+      updateData.description = updateData.description.trim();
+    }
+
+    if (updateData.category) {
+      updateData.category = updateData.category.trim();
+    }
+
+    if (updateData.address) {
+      updateData.address = updateData.address.trim();
+    }
+
+    if (updateData.phone) {
+      updateData.phone = updateData.phone.trim();
+    }
+
+    if (updateData.location?.coordinates) {
+      const longitude = Number(updateData.location.coordinates[0]);
+      const latitude = Number(updateData.location.coordinates[1]);
+
+      if (
+        Number.isNaN(latitude) ||
+        Number.isNaN(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return res.status(400).json({
+          message: 'Invalid business location coordinates.',
+        });
+      }
+
+      updateData.location = {
+        type: 'Point',
+        coordinates: [longitude, latitude],
+      };
+    }
+
     const updated = await Business.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updateData,
       {
         new: true,
         runValidators: true,
@@ -179,7 +255,7 @@ const updateBusiness = async (req, res) => {
     console.log('Update Business Error:', error);
 
     res.status(500).json({
-      message: 'Failed to update business.',
+      message: error.message || 'Failed to update business.',
     });
   }
 };
@@ -212,7 +288,7 @@ const deleteBusiness = async (req, res) => {
     console.log('Delete Business Error:', error);
 
     res.status(500).json({
-      message: 'Failed to delete business.',
+      message: error.message || 'Failed to delete business.',
     });
   }
 };
