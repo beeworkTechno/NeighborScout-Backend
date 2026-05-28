@@ -1,7 +1,6 @@
 const Review = require('../models/Review');
 const Business = require('../models/Business');
 
-// Clean review data before sending to frontend
 const formatReviewResponse = (review) => {
   return {
     _id: review._id,
@@ -54,19 +53,20 @@ const createReview = async (req, res) => {
   try {
     if (req.user.role === 'business') {
       return res.status(403).json({
-        message:
-          'Business accounts cannot rate or review businesses.',
+        message: 'Business accounts cannot rate or review businesses.',
       });
     }
 
-    const {
-      rating,
-      comment,
-    } = req.body;
-
+    const { rating, comment } = req.body;
     const businessId = req.params.businessId;
 
-    if (!rating || rating < 1 || rating > 5) {
+    const numericRating = Number(rating);
+
+    if (
+      Number.isNaN(numericRating) ||
+      numericRating < 1 ||
+      numericRating > 5
+    ) {
       return res.status(400).json({
         message: 'Rating must be between 1 and 5.',
       });
@@ -87,15 +87,14 @@ const createReview = async (req, res) => {
 
     if (existing) {
       return res.status(400).json({
-        message:
-          'You have already reviewed this business.',
+        message: 'You have already reviewed this business.',
       });
     }
 
     const review = await Review.create({
       business: businessId,
       user: req.user._id,
-      rating,
+      rating: numericRating,
       comment: comment || '',
     });
 
@@ -105,8 +104,7 @@ const createReview = async (req, res) => {
 
     if (error.code === 11000) {
       return res.status(400).json({
-        message:
-          'You have already reviewed this business.',
+        message: 'You have already reviewed this business.',
       });
     }
 
@@ -118,13 +116,12 @@ const createReview = async (req, res) => {
 
 // @desc    Update a review
 // @route   PUT /api/reviews/:id
-// @access  Private review owner only, personal users only
+// @access  Private personal review owner only
 const updateReview = async (req, res) => {
   try {
     if (req.user.role === 'business') {
       return res.status(403).json({
-        message:
-          'Business accounts cannot update reviews or ratings.',
+        message: 'Business accounts cannot update reviews or ratings.',
       });
     }
 
@@ -138,24 +135,26 @@ const updateReview = async (req, res) => {
 
     if (review.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({
-        message:
-          'You can only update your own review.',
+        message: 'You can only update your own review.',
       });
     }
 
-    const {
-      rating,
-      comment,
-    } = req.body;
+    const { rating, comment } = req.body;
 
     if (rating !== undefined) {
-      if (rating < 1 || rating > 5) {
+      const numericRating = Number(rating);
+
+      if (
+        Number.isNaN(numericRating) ||
+        numericRating < 1 ||
+        numericRating > 5
+      ) {
         return res.status(400).json({
           message: 'Rating must be between 1 and 5.',
         });
       }
 
-      review.rating = rating;
+      review.rating = numericRating;
     }
 
     if (comment !== undefined) {
@@ -176,13 +175,12 @@ const updateReview = async (req, res) => {
 
 // @desc    Delete a review
 // @route   DELETE /api/reviews/:id
-// @access  Private review owner only, personal users only
+// @access  Private personal review owner only
 const deleteReview = async (req, res) => {
   try {
     if (req.user.role === 'business') {
       return res.status(403).json({
-        message:
-          'Business accounts cannot delete reviews or ratings.',
+        message: 'Business accounts cannot delete reviews or ratings.',
       });
     }
 
@@ -196,8 +194,7 @@ const deleteReview = async (req, res) => {
 
     if (review.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({
-        message:
-          'You can only delete your own review.',
+        message: 'You can only delete your own review.',
       });
     }
 

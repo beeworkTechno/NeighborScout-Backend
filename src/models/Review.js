@@ -7,24 +7,24 @@ const pseudoAdjectives = [
   'Local',
   'Trusted',
   'Friendly',
-  'Curious',
   'Careful',
   'Kind',
   'Bright',
-  'Calm',
-  'Smart',
   'Fair',
+  'Calm',
+  'Curious',
+  'Reliable',
 ];
 
 const pseudoNouns = [
   'Neighbor',
   'Reviewer',
-  'Visitor',
   'Customer',
+  'Visitor',
   'Explorer',
-  'Guest',
   'Scout',
   'Resident',
+  'Guest',
   'User',
   'Friend',
 ];
@@ -49,8 +49,8 @@ const reviewSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Kept internally only.
-    // Do not expose this user field to frontend responses.
+    // Stored internally only.
+    // Do not expose this in API responses.
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -76,10 +76,12 @@ const reviewSchema = new mongoose.Schema(
       maxlength: 1000,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-// A user can only review a business once
+// One user can review one business only once
 reviewSchema.index(
   {
     business: 1,
@@ -124,12 +126,12 @@ const updateBusinessRating = async (businessId, ReviewModel) => {
   });
 };
 
-// After saving or updating a review, update business averageRating
+// Update business rating after create/update
 reviewSchema.post('save', async function () {
   await updateBusinessRating(this.business, this.constructor);
 });
 
-// After deleting a review, update business averageRating
+// Update business rating after delete
 reviewSchema.post('findOneAndDelete', async function (doc) {
   if (doc) {
     await updateBusinessRating(doc.business, doc.constructor);
