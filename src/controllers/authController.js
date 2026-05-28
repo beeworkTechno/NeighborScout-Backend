@@ -11,7 +11,9 @@ const generateToken = (id, role) => {
   const jwtSecret = process.env.JWT_SECRET;
 
   if (!jwtSecret) {
-    throw new Error('Missing JWT_SECRET environment variable. Add it to your .env file or environment settings.');
+    throw new Error(
+      'Missing JWT_SECRET environment variable. Add it to your .env file or environment settings.'
+    );
   }
 
   return jwt.sign(
@@ -21,34 +23,62 @@ const generateToken = (id, role) => {
   );
 };
 
+// Format express-validator errors
+const getValidationMessage = (errors) => {
+  if (!errors.isEmpty()) {
+    return errors.array()[0].msg || 'Invalid input data';
+  }
+
+  return null;
+};
+
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
 const register = async (req, res) => {
   const errors = validationResult(req);
+  const validationMessage = getValidationMessage(errors);
 
-  if (!errors.isEmpty()) {
+  if (validationMessage) {
     return res.status(400).json({
+      message: validationMessage,
       errors: errors.array(),
     });
   }
 
-  const { name, email, password, role = 'personal' } = req.body;
+  const {
+    name,
+    email,
+    password,
+    role = 'personal',
+  } = req.body;
 
   try {
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Check if user exists
-    const userExists = await User.findOne({ email });
+    const userExists = await User.findOne({
+      email: normalizedEmail,
+    });
 
     if (userExists) {
+      if (userExists.googleId && !userExists.password) {
+        return res.status(400).json({
+          message:
+            'This email is already registered with Google. Please use Continue with Google to login.',
+        });
+      }
+
       return res.status(400).json({
-        message: 'User already exists',
+        message:
+          'An account with this email already exists. Please login instead.',
       });
     }
 
     // Create user
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: normalizedEmail,
       password,
       role,
     });
@@ -62,8 +92,11 @@ const register = async (req, res) => {
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
+    console.log('Register Error:', error);
+
     res.status(500).json({
-      message: error.message,
+      message:
+        'Something went wrong while creating your account. Please try again.',
     });
   }
 };
@@ -73,9 +106,11 @@ const register = async (req, res) => {
 // @access  Public
 const login = async (req, res) => {
   const errors = validationResult(req);
+  const validationMessage = getValidationMessage(errors);
 
-  if (!errors.isEmpty()) {
+  if (validationMessage) {
     return res.status(400).json({
+      message: validationMessage,
       errors: errors.array(),
     });
   }
@@ -83,25 +118,48 @@ const login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const user = await User.findOne({ email });
+    const normalizedEmail = email.trim().toLowerCase();
 
-    if (user && (await user.matchPassword(password))) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar,
-        role: user.role,
-        token: generateToken(user._id, user.role),
-      });
-    } else {
-      res.status(401).json({
-        message: 'Invalid email or password',
+    const user = await User.findOne({
+      email: normalizedEmail,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message:
+          'No account found with this email. Please register first.',
       });
     }
+
+    if (user.googleId && !user.password) {
+      return res.status(401).json({
+        message:
+          'This account was created with Google. Please use Continue with Google to login.',
+      });
+    }
+
+    const isPasswordCorrect = await user.matchPassword(password);
+
+    if (!isPasswordCorrect) {
+      return res.status(401).json({
+        message: 'Incorrect password. Please try again.',
+      });
+    }
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      role: user.role,
+      token: generateToken(user._id, user.role),
+    });
   } catch (error) {
+    console.log('Login Error:', error);
+
     res.status(500).json({
-      message: error.message,
+      message:
+        'Something went wrong while logging in. Please try again.',
     });
   }
 };
@@ -115,7 +173,14 @@ const googleLogin = async (req, res) => {
 
     if (!token) {
       return res.status(400).json({
-        message: 'Google token missing',
+        message: 'Google token missing. Please try again.',
+      });
+    }
+
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({
+        message:
+          'Google login is not configured properly on the server.',
       });
     }
 
@@ -127,21 +192,48 @@ const googleLogin = async (req, res) => {
 
     const payload = ticket.getPayload();
 
-    const { sub, email, name, picture } = payload;
+    if (!payload?.email) {
+      return res.status(400).json({
+        message:
+          'Could not get email from Google account. Please try again.',
+      });
+    }
+
+    const {
+      sub,
+      email,
+      name,
+      picture,
+    } = payload;
+
+    const normalizedEmail = email.trim().toLowerCase();
 
     // Find existing user
-    let user = await User.findOne({ email });
+    let user = await User.findOne({
+      email: normalizedEmail,
+    });
 
     // Create user if not exists
     if (!user) {
       user = await User.create({
-        name,
-        email,
+        name: name || 'Google User',
+        email: normalizedEmail,
         avatar: picture,
         googleId: sub,
         password: '',
         role: 'personal',
       });
+    }
+
+    // If existing normal user logs in with Google, attach googleId if missing
+    if (user && !user.googleId) {
+      user.googleId = sub;
+
+      if (!user.avatar && picture) {
+        user.avatar = picture;
+      }
+
+      await user.save();
     }
 
     // Return user data + JWT
@@ -154,9 +246,11 @@ const googleLogin = async (req, res) => {
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
-    console.log(error);
+    console.log('Google Login Error:', error);
+
     res.status(500).json({
-      message: 'Google login failed',
+      message:
+        'Google login failed. Please try again.',
     });
   }
 };
