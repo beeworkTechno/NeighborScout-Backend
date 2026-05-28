@@ -56,7 +56,6 @@ const register = async (req, res) => {
   try {
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Check if user exists
     const userExists = await User.findOne({
       email: normalizedEmail,
     });
@@ -75,7 +74,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Create user
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,
@@ -89,6 +87,8 @@ const register = async (req, res) => {
       email: user.email,
       avatar: user.avatar,
       role: user.role,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
@@ -152,6 +152,8 @@ const login = async (req, res) => {
       email: user.email,
       avatar: user.avatar,
       role: user.role,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
@@ -184,7 +186,6 @@ const googleLogin = async (req, res) => {
       });
     }
 
-    // Verify Google token
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -208,12 +209,10 @@ const googleLogin = async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Find existing user
     let user = await User.findOne({
       email: normalizedEmail,
     });
 
-    // Create user if not exists
     if (!user) {
       user = await User.create({
         name: name || 'Google User',
@@ -225,7 +224,6 @@ const googleLogin = async (req, res) => {
       });
     }
 
-    // If existing normal user logs in with Google, attach googleId if missing
     if (user && !user.googleId) {
       user.googleId = sub;
 
@@ -236,13 +234,14 @@ const googleLogin = async (req, res) => {
       await user.save();
     }
 
-    // Return user data + JWT
     res.json({
       _id: user._id,
       name: user.name,
       email: user.email,
       avatar: user.avatar,
       role: user.role,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
@@ -265,6 +264,9 @@ const getMe = async (req, res) => {
     email: req.user.email,
     avatar: req.user.avatar,
     role: req.user.role,
+    googleId: req.user.googleId,
+    createdAt: req.user.createdAt,
+    updatedAt: req.user.updatedAt,
   });
 };
 
