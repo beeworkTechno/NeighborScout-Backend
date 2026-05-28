@@ -9,10 +9,11 @@ const {
 } = require('../controllers/reviewController');
 
 const { protect } = require('../middleware/auth');
+const { optionalAuth } = require('../middleware/optionalAuth');
 
 router
   .route('/:businessId')
-  .get(getReviews)
+  .get(optionalAuth, getReviews)
   .post(protect, createReview);
 
 router

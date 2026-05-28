@@ -1,7 +1,16 @@
 const Review = require('../models/Review');
 const Business = require('../models/Business');
 
-const formatReviewResponse = (review) => {
+const formatReviewResponse = (review, currentUser = null) => {
+  const reviewUserId = review.user?._id
+    ? review.user._id.toString()
+    : review.user?.toString();
+
+  const currentUserId = currentUser?._id?.toString();
+
+  const isOwner =
+    reviewUserId && currentUserId && reviewUserId === currentUserId;
+
   return {
     _id: review._id,
     business: review.business,
@@ -10,31 +19,30 @@ const formatReviewResponse = (review) => {
     comment: review.comment,
     createdAt: review.createdAt,
     updatedAt: review.updatedAt,
+
+    // Safe frontend permissions.
+    // Real user identity is still not exposed.
+    canEdit: Boolean(isOwner && currentUser?.role !== 'business'),
+    canDelete: Boolean(isOwner && currentUser?.role !== 'business'),
   };
 };
 
 // @desc    Get reviews for a business
 // @route   GET /api/reviews/:businessId
-// @access  Public
+// @access  Public, with optional user permissions
 const getReviews = async (req, res) => {
   try {
     const reviews = await Review.find({
       business: req.params.businessId,
     })
+      .select('+user')
       .sort({
         createdAt: -1,
-      })
-      .lean();
+      });
 
-    const safeReviews = reviews.map((review) => ({
-      _id: review._id,
-      business: review.business,
-      pseudoName: review.pseudoName || 'Anonymous Neighbor',
-      rating: review.rating,
-      comment: review.comment,
-      createdAt: review.createdAt,
-      updatedAt: review.updatedAt,
-    }));
+    const safeReviews = reviews.map((review) =>
+      formatReviewResponse(review, req.user)
+    );
 
     res.json(safeReviews);
   } catch (error) {
@@ -95,10 +103,12 @@ const createReview = async (req, res) => {
       business: businessId,
       user: req.user._id,
       rating: numericRating,
-      comment: comment || '',
+      comment: comment?.trim() || '',
     });
 
-    res.status(201).json(formatReviewResponse(review));
+    const fullReview = await Review.findById(review._id).select('+user');
+
+    res.status(201).json(formatReviewResponse(fullReview, req.user));
   } catch (error) {
     console.log('Create Review Error:', error);
 
@@ -158,12 +168,14 @@ const updateReview = async (req, res) => {
     }
 
     if (comment !== undefined) {
-      review.comment = comment;
+      review.comment = comment.trim();
     }
 
     await review.save();
 
-    res.json(formatReviewResponse(review));
+    const updatedReview = await Review.findById(review._id).select('+user');
+
+    res.json(formatReviewResponse(updatedReview, req.user));
   } catch (error) {
     console.log('Update Review Error:', error);
 
