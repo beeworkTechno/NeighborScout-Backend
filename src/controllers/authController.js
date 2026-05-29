@@ -3,10 +3,8 @@ const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 
-// Google OAuth Client
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Generate JWT
 const generateToken = (id, role) => {
   const jwtSecret = process.env.JWT_SECRET;
 
@@ -16,20 +14,28 @@ const generateToken = (id, role) => {
     );
   }
 
-  return jwt.sign(
-    { id, role },
-    jwtSecret,
-    { expiresIn: '30d' }
-  );
+  return jwt.sign({ id, role }, jwtSecret, { expiresIn: '30d' });
 };
 
-// Format express-validator errors
 const getValidationMessage = (errors) => {
   if (!errors.isEmpty()) {
     return errors.array()[0].msg || 'Invalid input data';
   }
 
   return null;
+};
+
+const formatUserResponse = (user) => {
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar,
+    role: user.role,
+    googleId: user.googleId,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
 };
 
 // @desc    Register user
@@ -46,12 +52,7 @@ const register = async (req, res) => {
     });
   }
 
-  const {
-    name,
-    email,
-    password,
-    role = 'personal',
-  } = req.body;
+  const { name, email, password, role = 'personal' } = req.body;
 
   try {
     const normalizedEmail = email.trim().toLowerCase();
@@ -82,13 +83,7 @@ const register = async (req, res) => {
     });
 
     res.status(201).json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      role: user.role,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      ...formatUserResponse(user),
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
@@ -126,8 +121,7 @@ const login = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({
-        message:
-          'No account found with this email. Please register first.',
+        message: 'No account found with this email. Please register first.',
       });
     }
 
@@ -147,21 +141,14 @@ const login = async (req, res) => {
     }
 
     res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      role: user.role,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      ...formatUserResponse(user),
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
     console.log('Login Error:', error);
 
     res.status(500).json({
-      message:
-        'Something went wrong while logging in. Please try again.',
+      message: 'Something went wrong while logging in. Please try again.',
     });
   }
 };
@@ -181,8 +168,7 @@ const googleLogin = async (req, res) => {
 
     if (!process.env.GOOGLE_CLIENT_ID) {
       return res.status(500).json({
-        message:
-          'Google login is not configured properly on the server.',
+        message: 'Google login is not configured properly on the server.',
       });
     }
 
@@ -195,17 +181,11 @@ const googleLogin = async (req, res) => {
 
     if (!payload?.email) {
       return res.status(400).json({
-        message:
-          'Could not get email from Google account. Please try again.',
+        message: 'Could not get email from Google account. Please try again.',
       });
     }
 
-    const {
-      sub,
-      email,
-      name,
-      picture,
-    } = payload;
+    const { sub, email, name, picture } = payload;
 
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -217,7 +197,7 @@ const googleLogin = async (req, res) => {
       user = await User.create({
         name: name || 'Google User',
         email: normalizedEmail,
-        avatar: picture,
+        avatar: picture || '',
         googleId: sub,
         password: '',
         role: 'personal',
@@ -235,21 +215,14 @@ const googleLogin = async (req, res) => {
     }
 
     res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      role: user.role,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      ...formatUserResponse(user),
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
     console.log('Google Login Error:', error);
 
     res.status(500).json({
-      message:
-        'Google login failed. Please try again.',
+      message: 'Google login failed. Please try again.',
     });
   }
 };
@@ -258,16 +231,34 @@ const googleLogin = async (req, res) => {
 // @route   GET /api/auth/me
 // @access  Private
 const getMe = async (req, res) => {
-  res.json({
-    _id: req.user._id,
-    name: req.user.name,
-    email: req.user.email,
-    avatar: req.user.avatar,
-    role: req.user.role,
-    googleId: req.user.googleId,
-    createdAt: req.user.createdAt,
-    updatedAt: req.user.updatedAt,
-  });
+  res.json(formatUserResponse(req.user));
+};
+
+// @desc    Update user profile photo
+// @route   PUT /api/auth/profile-photo
+// @access  Private
+const updateProfilePhoto = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        message: 'Please upload an image.',
+      });
+    }
+
+    req.user.avatar = `/uploads/${req.file.filename}`;
+    await req.user.save();
+
+    res.json({
+      message: 'Profile photo updated successfully.',
+      user: formatUserResponse(req.user),
+    });
+  } catch (error) {
+    console.log('Update Profile Photo Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to update profile photo.',
+    });
+  }
 };
 
 module.exports = {
@@ -275,4 +266,5 @@ module.exports = {
   login,
   googleLogin,
   getMe,
+  updateProfilePhoto,
 };

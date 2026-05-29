@@ -6,21 +6,23 @@ const {
   login,
   googleLogin,
   getMe,
+  updateProfilePhoto,
 } = require('../controllers/authController');
 
 const { protect } = require('../middleware/auth');
+const upload = require('../middleware/upload');
 
 const router = express.Router();
 
-// ==========================
 // Register
-// ==========================
 router.post(
   '/register',
   [
     body('name', 'Name is required').notEmpty(),
     body('email', 'Please include a valid email').isEmail(),
-    body('password', 'Password must be at least 6 characters').isLength({ min: 6 }),
+    body('password', 'Password must be at least 6 characters').isLength({
+      min: 6,
+    }),
     body('role')
       .optional()
       .isIn(['personal', 'business'])
@@ -29,9 +31,7 @@ router.post(
   register
 );
 
-// ==========================
 // Login
-// ==========================
 router.post(
   '/login',
   [
@@ -41,14 +41,18 @@ router.post(
   login
 );
 
-// ==========================
 // Google Login
-// ==========================
 router.post('/google', googleLogin);
 
-// ==========================
-// Current Logged In User
-// ==========================
+// Current logged-in user
 router.get('/me', protect, getMe);
+
+// Update user profile photo
+router.put(
+  '/profile-photo',
+  protect,
+  upload.single('profilePhoto'),
+  updateProfilePhoto
+);
 
 module.exports = router;

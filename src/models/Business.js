@@ -32,6 +32,11 @@ const businessSchema = new mongoose.Schema(
       trim: true,
     },
 
+    profilePhoto: {
+      type: String,
+      default: '',
+    },
+
     location: {
       type: {
         type: String,

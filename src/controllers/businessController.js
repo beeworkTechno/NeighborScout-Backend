@@ -18,6 +18,49 @@ const addBusinessPageUrls = (businesses) => {
   return businesses.map((business) => addBusinessPageUrl(business));
 };
 
+const parseLocationFromBody = (body) => {
+  let location = body.location;
+
+  if (typeof location === 'string') {
+    try {
+      location = JSON.parse(location);
+    } catch (error) {
+      location = null;
+    }
+  }
+
+  if (
+    location &&
+    Array.isArray(location.coordinates) &&
+    location.coordinates.length === 2
+  ) {
+    return {
+      longitude: Number(location.coordinates[0]),
+      latitude: Number(location.coordinates[1]),
+    };
+  }
+
+  if (body.latitude !== undefined && body.longitude !== undefined) {
+    return {
+      longitude: Number(body.longitude),
+      latitude: Number(body.latitude),
+    };
+  }
+
+  return null;
+};
+
+const isValidCoordinates = (longitude, latitude) => {
+  return (
+    !Number.isNaN(latitude) &&
+    !Number.isNaN(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+};
+
 // @desc    Get all businesses with optional filters
 // @route   GET /api/businesses
 // @access  Public
@@ -32,10 +75,26 @@ const getBusinesses = async (req, res) => {
     }
 
     if (search) {
-      query.name = {
-        $regex: search,
-        $options: 'i',
-      };
+      query.$or = [
+        {
+          name: {
+            $regex: search,
+            $options: 'i',
+          },
+        },
+        {
+          category: {
+            $regex: search,
+            $options: 'i',
+          },
+        },
+        {
+          address: {
+            $regex: search,
+            $options: 'i',
+          },
+        },
+      ];
     }
 
     let sort = {
@@ -136,14 +195,7 @@ const createBusiness = async (req, res) => {
       });
     }
 
-    const {
-      name,
-      description,
-      category,
-      address,
-      phone,
-      location,
-    } = req.body;
+    const { name, description, category, address, phone } = req.body;
 
     if (!name || !description || !category) {
       return res.status(400).json({
@@ -151,28 +203,18 @@ const createBusiness = async (req, res) => {
       });
     }
 
-    if (
-      !location ||
-      !Array.isArray(location.coordinates) ||
-      location.coordinates.length !== 2
-    ) {
+    const parsedLocation = parseLocationFromBody(req.body);
+
+    if (!parsedLocation) {
       return res.status(400).json({
         message:
           'Business location is required. Please provide longitude and latitude.',
       });
     }
 
-    const longitude = Number(location.coordinates[0]);
-    const latitude = Number(location.coordinates[1]);
+    const { longitude, latitude } = parsedLocation;
 
-    if (
-      Number.isNaN(latitude) ||
-      Number.isNaN(longitude) ||
-      latitude < -90 ||
-      latitude > 90 ||
-      longitude < -180 ||
-      longitude > 180
-    ) {
+    if (!isValidCoordinates(longitude, latitude)) {
       return res.status(400).json({
         message: 'Invalid business location coordinates.',
       });
@@ -184,6 +226,7 @@ const createBusiness = async (req, res) => {
       category: category.trim(),
       address: address?.trim() || 'Address not provided',
       phone: phone?.trim() || '',
+      profilePhoto: req.file ? `/uploads/${req.file.filename}` : '',
       location: {
         type: 'Point',
         coordinates: [longitude, latitude],
@@ -225,61 +268,53 @@ const updateBusiness = async (req, res) => {
       });
     }
 
-    const updateData = {
-      ...req.body,
-    };
-
-    if (updateData.name) {
-      updateData.name = updateData.name.trim();
+    if (req.body.name) {
+      business.name = req.body.name.trim();
     }
 
-    if (updateData.description) {
-      updateData.description = updateData.description.trim();
+    if (req.body.description) {
+      business.description = req.body.description.trim();
     }
 
-    if (updateData.category) {
-      updateData.category = updateData.category.trim();
+    if (req.body.category) {
+      business.category = req.body.category.trim();
     }
 
-    if (updateData.address) {
-      updateData.address = updateData.address.trim();
+    if (req.body.address) {
+      business.address = req.body.address.trim();
     }
 
-    if (updateData.phone) {
-      updateData.phone = updateData.phone.trim();
+    if (req.body.phone !== undefined) {
+      business.phone = req.body.phone.trim();
     }
 
-    if (updateData.location?.coordinates) {
-      const longitude = Number(updateData.location.coordinates[0]);
-      const latitude = Number(updateData.location.coordinates[1]);
+    if (req.file) {
+      business.profilePhoto = `/uploads/${req.file.filename}`;
+    }
 
-      if (
-        Number.isNaN(latitude) ||
-        Number.isNaN(longitude) ||
-        latitude < -90 ||
-        latitude > 90 ||
-        longitude < -180 ||
-        longitude > 180
-      ) {
+    const parsedLocation = parseLocationFromBody(req.body);
+
+    if (parsedLocation) {
+      const { longitude, latitude } = parsedLocation;
+
+      if (!isValidCoordinates(longitude, latitude)) {
         return res.status(400).json({
           message: 'Invalid business location coordinates.',
         });
       }
 
-      updateData.location = {
+      business.location = {
         type: 'Point',
         coordinates: [longitude, latitude],
       };
     }
 
-    const updated = await Business.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).populate('owner', 'name avatar email');
+    const savedBusiness = await business.save();
+
+    const updated = await Business.findById(savedBusiness._id).populate(
+      'owner',
+      'name avatar email'
+    );
 
     res.json(addBusinessPageUrl(updated));
   } catch (error) {
