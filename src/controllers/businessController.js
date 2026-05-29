@@ -1,5 +1,23 @@
 const Business = require('../models/Business');
 
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8081';
+
+const addBusinessPageUrl = (business) => {
+  if (!business) return business;
+
+  const businessObject =
+    typeof business.toObject === 'function' ? business.toObject() : business;
+
+  return {
+    ...businessObject,
+    businessPageUrl: `${FRONTEND_URL}/business/${businessObject._id}`,
+  };
+};
+
+const addBusinessPageUrls = (businesses) => {
+  return businesses.map((business) => addBusinessPageUrl(business));
+};
+
 // @desc    Get all businesses with optional filters
 // @route   GET /api/businesses
 // @access  Public
@@ -36,11 +54,19 @@ const getBusinesses = async (req, res) => {
       };
     }
 
+    if (sortBy === 'popular') {
+      sort = {
+        reviewCount: -1,
+        averageRating: -1,
+        createdAt: -1,
+      };
+    }
+
     const businesses = await Business.find(query)
       .populate('owner', 'name avatar')
       .sort(sort);
 
-    res.json(businesses);
+    res.json(addBusinessPageUrls(businesses));
   } catch (error) {
     console.log('Get Businesses Error:', error);
 
@@ -63,7 +89,7 @@ const getMyBusinesses = async (req, res) => {
         createdAt: -1,
       });
 
-    res.json(businesses);
+    res.json(addBusinessPageUrls(businesses));
   } catch (error) {
     console.log('Get My Businesses Error:', error);
 
@@ -89,7 +115,7 @@ const getBusiness = async (req, res) => {
       });
     }
 
-    res.json(business);
+    res.json(addBusinessPageUrl(business));
   } catch (error) {
     console.log('Get Business Error:', error);
 
@@ -165,7 +191,12 @@ const createBusiness = async (req, res) => {
       owner: req.user._id,
     });
 
-    res.status(201).json(business);
+    const createdBusiness = await Business.findById(business._id).populate(
+      'owner',
+      'name avatar email'
+    );
+
+    res.status(201).json(addBusinessPageUrl(createdBusiness));
   } catch (error) {
     console.log('Create Business Error:', error);
 
@@ -248,9 +279,9 @@ const updateBusiness = async (req, res) => {
         new: true,
         runValidators: true,
       }
-    );
+    ).populate('owner', 'name avatar email');
 
-    res.json(updated);
+    res.json(addBusinessPageUrl(updated));
   } catch (error) {
     console.log('Update Business Error:', error);
 
@@ -283,6 +314,8 @@ const deleteBusiness = async (req, res) => {
 
     res.json({
       message: 'Business removed',
+      deletedBusinessId: req.params.id,
+      deletedBusinessPageUrl: `${FRONTEND_URL}/business/${req.params.id}`,
     });
   } catch (error) {
     console.log('Delete Business Error:', error);
