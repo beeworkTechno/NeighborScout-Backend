@@ -23,11 +23,13 @@ const userSchema = new mongoose.Schema(
       default: '',
     },
 
+    // External avatar URL, for example Google profile photo
     avatar: {
       type: String,
       default: '',
     },
 
+    // Uploaded profile photo stored in MongoDB
     profilePhoto: {
       data: Buffer,
       contentType: String,

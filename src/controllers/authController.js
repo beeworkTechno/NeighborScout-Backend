@@ -5,6 +5,8 @@ const User = require('../models/User');
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:5001/api';
+
 const generateToken = (id, role) => {
   const jwtSecret = process.env.JWT_SECRET;
 
@@ -25,14 +27,40 @@ const getValidationMessage = (errors) => {
   return null;
 };
 
+const userHasProfilePhoto = (user) => {
+  return Boolean(
+    user &&
+      user.profilePhoto &&
+      user.profilePhoto.data &&
+      user.profilePhoto.contentType
+  );
+};
+
+const getUserProfilePhotoUrl = (user) => {
+  if (!userHasProfilePhoto(user) || !user?._id) {
+    return '';
+  }
+
+  return `${API_BASE_URL}/auth/profile-photo/${user._id}`;
+};
+
 const formatUserResponse = (user) => {
+  const hasProfilePhoto = userHasProfilePhoto(user);
+
   return {
     _id: user._id,
     name: user.name,
     email: user.email,
+
+    // Google avatar URL can still exist, but uploaded MongoDB photo has priority on frontend.
     avatar: user.avatar,
+
     role: user.role,
     googleId: user.googleId,
+
+    hasProfilePhoto,
+    profilePhotoUrl: hasProfilePhoto ? getUserProfilePhotoUrl(user) : '',
+
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -186,7 +214,6 @@ const googleLogin = async (req, res) => {
     }
 
     const { sub, email, name, picture } = payload;
-
     const normalizedEmail = email.trim().toLowerCase();
 
     let user = await User.findOne({
@@ -234,7 +261,7 @@ const getMe = async (req, res) => {
   res.json(formatUserResponse(req.user));
 };
 
-// @desc    Update user profile photo
+// @desc    Update logged-in user's profile photo
 // @route   PUT /api/auth/profile-photo
 // @access  Private
 const updateProfilePhoto = async (req, res) => {
@@ -245,18 +272,54 @@ const updateProfilePhoto = async (req, res) => {
       });
     }
 
-    req.user.avatar = `/uploads/${req.file.filename}`;
-    await req.user.save();
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        message: 'User not found.',
+      });
+    }
+
+    user.profilePhoto = {
+      data: req.file.buffer,
+      contentType: req.file.mimetype,
+    };
+
+    await user.save();
 
     res.json({
       message: 'Profile photo updated successfully.',
-      user: formatUserResponse(req.user),
+      user: formatUserResponse(user),
     });
   } catch (error) {
     console.log('Update Profile Photo Error:', error);
 
     res.status(500).json({
-      message: 'Failed to update profile photo.',
+      message: error.message || 'Failed to update profile photo.',
+    });
+  }
+};
+
+// @desc    Get user profile photo from MongoDB
+// @route   GET /api/auth/profile-photo/:userId
+// @access  Public
+const getUserProfilePhoto = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select('profilePhoto');
+
+    if (!user || !user.profilePhoto?.data) {
+      return res.status(404).json({
+        message: 'Profile photo not found.',
+      });
+    }
+
+    res.set('Content-Type', user.profilePhoto.contentType || 'image/jpeg');
+    res.send(user.profilePhoto.data);
+  } catch (error) {
+    console.log('Get User Profile Photo Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to load profile photo.',
     });
   }
 };
@@ -267,4 +330,5 @@ module.exports = {
   googleLogin,
   getMe,
   updateProfilePhoto,
+  getUserProfilePhoto,
 };

@@ -7,6 +7,7 @@ const {
   googleLogin,
   getMe,
   updateProfilePhoto,
+  getUserProfilePhoto,
 } = require('../controllers/authController');
 
 const { protect } = require('../middleware/auth');
@@ -47,12 +48,16 @@ router.post('/google', googleLogin);
 // Current logged-in user
 router.get('/me', protect, getMe);
 
-// Update user profile photo
+// Update logged-in user's profile photo
 router.put(
   '/profile-photo',
   protect,
   upload.single('profilePhoto'),
   updateProfilePhoto
 );
+
+// Get any user's profile photo
+// Used by frontend <Image />
+router.get('/profile-photo/:userId', getUserProfilePhoto);
 
 module.exports = router;
