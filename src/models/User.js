@@ -28,6 +28,11 @@ const userSchema = new mongoose.Schema(
       default: '',
     },
 
+    profilePhoto: {
+      data: Buffer,
+      contentType: String,
+    },
+
     googleId: {
       type: String,
       default: '',
@@ -44,7 +49,6 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving
 userSchema.pre('save', async function () {
   if (!this.isModified('password') || !this.password) return;
 
@@ -52,7 +56,6 @@ userSchema.pre('save', async function () {
   this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Compare entered password with hashed password
 userSchema.methods.matchPassword = async function (enteredPassword) {
   if (!this.password) return false;
   return await bcrypt.compare(enteredPassword, this.password);

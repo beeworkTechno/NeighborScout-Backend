@@ -33,8 +33,8 @@ const businessSchema = new mongoose.Schema(
     },
 
     profilePhoto: {
-      type: String,
-      default: '',
+      data: Buffer,
+      contentType: String,
     },
 
     location: {

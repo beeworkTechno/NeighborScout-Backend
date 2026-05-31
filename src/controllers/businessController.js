@@ -8,8 +8,18 @@ const addBusinessPageUrl = (business) => {
   const businessObject =
     typeof business.toObject === 'function' ? business.toObject() : business;
 
+  const hasProfilePhoto = Boolean(
+    businessObject.profilePhoto && businessObject.profilePhoto.contentType
+  );
+
+  delete businessObject.profilePhoto;
+
   return {
     ...businessObject,
+    hasProfilePhoto,
+    photoUrl: hasProfilePhoto
+      ? `/api/businesses/${businessObject._id}/photo`
+      : '',
     businessPageUrl: `${FRONTEND_URL}/business/${businessObject._id}`,
   };
 };
@@ -122,6 +132,7 @@ const getBusinesses = async (req, res) => {
     }
 
     const businesses = await Business.find(query)
+      .select('-profilePhoto.data')
       .populate('owner', 'name avatar')
       .sort(sort);
 
@@ -143,6 +154,7 @@ const getMyBusinesses = async (req, res) => {
     const businesses = await Business.find({
       owner: req.user._id,
     })
+      .select('-profilePhoto.data')
       .populate('owner', 'name avatar email')
       .sort({
         createdAt: -1,
@@ -163,10 +175,9 @@ const getMyBusinesses = async (req, res) => {
 // @access  Public
 const getBusiness = async (req, res) => {
   try {
-    const business = await Business.findById(req.params.id).populate(
-      'owner',
-      'name avatar email'
-    );
+    const business = await Business.findById(req.params.id)
+      .select('-profilePhoto.data')
+      .populate('owner', 'name avatar email');
 
     if (!business) {
       return res.status(404).json({
@@ -180,6 +191,32 @@ const getBusiness = async (req, res) => {
 
     res.status(500).json({
       message: 'Failed to load business.',
+    });
+  }
+};
+
+// @desc    Get business photo from MongoDB
+// @route   GET /api/businesses/:id/photo
+// @access  Public
+const getBusinessPhoto = async (req, res) => {
+  try {
+    const business = await Business.findById(req.params.id).select(
+      'profilePhoto'
+    );
+
+    if (!business || !business.profilePhoto || !business.profilePhoto.data) {
+      return res.status(404).json({
+        message: 'Business photo not found.',
+      });
+    }
+
+    res.set('Content-Type', business.profilePhoto.contentType || 'image/jpeg');
+    res.send(business.profilePhoto.data);
+  } catch (error) {
+    console.log('Get Business Photo Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to load business photo.',
     });
   }
 };
@@ -220,24 +257,31 @@ const createBusiness = async (req, res) => {
       });
     }
 
-    const business = await Business.create({
+    const businessData = {
       name: name.trim(),
       description: description.trim(),
       category: category.trim(),
       address: address?.trim() || 'Address not provided',
       phone: phone?.trim() || '',
-      profilePhoto: req.file ? `/uploads/${req.file.filename}` : '',
       location: {
         type: 'Point',
         coordinates: [longitude, latitude],
       },
       owner: req.user._id,
-    });
+    };
 
-    const createdBusiness = await Business.findById(business._id).populate(
-      'owner',
-      'name avatar email'
-    );
+    if (req.file) {
+      businessData.profilePhoto = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+      };
+    }
+
+    const business = await Business.create(businessData);
+
+    const createdBusiness = await Business.findById(business._id)
+      .select('-profilePhoto.data')
+      .populate('owner', 'name avatar email');
 
     res.status(201).json(addBusinessPageUrl(createdBusiness));
   } catch (error) {
@@ -289,7 +333,10 @@ const updateBusiness = async (req, res) => {
     }
 
     if (req.file) {
-      business.profilePhoto = `/uploads/${req.file.filename}`;
+      business.profilePhoto = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+      };
     }
 
     const parsedLocation = parseLocationFromBody(req.body);
@@ -311,10 +358,9 @@ const updateBusiness = async (req, res) => {
 
     const savedBusiness = await business.save();
 
-    const updated = await Business.findById(savedBusiness._id).populate(
-      'owner',
-      'name avatar email'
-    );
+    const updated = await Business.findById(savedBusiness._id)
+      .select('-profilePhoto.data')
+      .populate('owner', 'name avatar email');
 
     res.json(addBusinessPageUrl(updated));
   } catch (error) {
@@ -365,6 +411,7 @@ module.exports = {
   getBusinesses,
   getMyBusinesses,
   getBusiness,
+  getBusinessPhoto,
   createBusiness,
   updateBusiness,
   deleteBusiness,

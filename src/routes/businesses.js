@@ -5,6 +5,7 @@ const {
   getBusinesses,
   getMyBusinesses,
   getBusiness,
+  getBusinessPhoto,
   createBusiness,
   updateBusiness,
   deleteBusiness,
@@ -19,6 +20,8 @@ router
   .post(protect, upload.single('profilePhoto'), createBusiness);
 
 router.route('/my').get(protect, getMyBusinesses);
+
+router.route('/:id/photo').get(getBusinessPhoto);
 
 router
   .route('/:id')
