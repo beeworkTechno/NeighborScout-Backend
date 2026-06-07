@@ -1,0 +1,6 @@
+{"_e":"root:init","_t":1780847389939,"format":"v0-jsonl","version":"56.1.14"}
+{"_e":"env:mode","_t":1780847389940,"nodeEnv":"development","babelEnv":"development","mode":"development"}
+{"_e":"env:load","_t":1780847389946,"mode":"development","files":["../..\\..\\.env"],"env":{"JWT_SECRET":"rahul12345","MONGO_URI":"mongodb+srv://neighbor:R%2EFgA2rz%2E2ssSKH@cluster0.mt7pggs.mongodb.net/neighborscout?retryWrites=true&w=majority&appName=Cluster0","PORT":"5000"}}
+{"_e":"devserver:start","_t":1780847393791,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../..\\..\\app","serverComponents":false,"serverActions":false,"serverRendering":false,"apiRoutes":false,"exporting":false}
+{"_e":"metro:config","_t":1780847394438,"serverRoot":"../..\\..","projectRoot":"../..\\..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"metro:instantiate","_t":1780847402599,"atlas":false,"workers":10,"host":"::","port":8082}

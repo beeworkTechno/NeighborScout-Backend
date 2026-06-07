@@ -23,6 +23,7 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "expo": "^56.0.9",
     "express": "^5.2.1",
     "express-validator": "^7.3.2",
     "google-auth-library": "^10.6.2",
