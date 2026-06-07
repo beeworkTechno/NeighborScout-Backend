@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const connectDB = require('./src/config/db');
@@ -40,6 +42,56 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     message: 'NeighborScout backend is healthy',
   });
+});
+
+// Share endpoints
+const SHARE_BASE_URL = process.env.SHARE_BASE_URL || 'https://neighborscout-backend.onrender.com';
+const SHARE_TEMPLATE_PATH = path.join(__dirname, 'shareTemplate.html');
+
+app.get('/api/share/business/:businessId', (req, res) => {
+  const { businessId } = req.params;
+  const { name, address, lat, lng } = req.query;
+
+  if (!businessId) return res.status(400).json({ error: 'Missing businessId.' });
+
+  const baseUrl = process.env.SHARE_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  const queryParams = new URLSearchParams();
+  if (name) queryParams.set('name', name);
+  if (address) queryParams.set('address', address);
+  if (lat) queryParams.set('lat', lat);
+  if (lng) queryParams.set('lng', lng);
+
+  const shareUrl =
+    `${baseUrl}/share/business/${encodeURIComponent(businessId)}` +
+    (queryParams.toString() ? `?${queryParams.toString()}` : '');
+
+  res.json({ shareUrl });
+});
+console.log("✅ Registering /share/business route");
+
+app.get('/share/business/:businessId', (req, res) => {
+    console.log("✅ Share route was hit");
+  const { businessId } = req.params;
+  const { name, address, lat, lng } = req.query;
+
+  if (!businessId) return res.status(400).send('Missing business ID.');
+
+  let html = fs.readFileSync(SHARE_TEMPLATE_PATH, 'utf8');
+  const appDeepLink = `neighborscout://business/${encodeURIComponent(businessId)}`;
+  const mapsUrl =
+    lat && lng
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lat)},${encodeURIComponent(lng)}`
+      : 'https://www.google.com/maps';
+
+  html = html.replace(/%BUSINESS_NAME%/g, name || 'Shared business');
+  html = html.replace(/%BUSINESS_ADDRESS%/g, address || 'Address not available');
+  html = html.replace(/%LATITUDE%/g, lat || '');
+  html = html.replace(/%LONGITUDE%/g, lng || '');
+  html = html.replace(/%GOOGLE_MAPS_URL%/g, mapsUrl);
+  html = html.replace(/%APP_DEEP_LINK%/g, appDeepLink);
+
+  res.setHeader('Content-Type', 'text/html');
+  res.send(html);
 });
 
 // Routes
