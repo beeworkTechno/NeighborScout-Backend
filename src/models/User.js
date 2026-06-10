@@ -20,7 +20,10 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       minlength: 6,
-      default: '',
+      required: function () {
+        return !this.googleId;
+      },
+      default: undefined,
     },
 
     // External avatar URL, for example Google profile photo
@@ -51,11 +54,19 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-userSchema.pre('save', async function () {
-  if (!this.isModified('password') || !this.password) return;
+userSchema.pre('save', async function (next) {
+  try {
+    if (!this.isModified('password') || !this.password) {
+      return next();
+    }
 
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 });
 
 userSchema.methods.matchPassword = async function (enteredPassword) {

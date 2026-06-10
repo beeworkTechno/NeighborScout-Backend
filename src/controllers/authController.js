@@ -300,7 +300,6 @@ const googleLogin = async (req, res) => {
         email: normalizedEmail,
         avatar: googleUser.picture || '',
         googleId: googleUser.googleId,
-        password: '',
         role: 'personal',
       });
     } else {
