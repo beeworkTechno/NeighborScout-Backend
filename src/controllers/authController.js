@@ -1,6 +1,8 @@
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
+const axios = require('axios');
+
 const User = require('../models/User');
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -99,31 +101,36 @@ const getGoogleUserFromAccessToken = async (accessToken) => {
     return null;
   }
 
-  const googleResponse = await fetch(
-    'https://www.googleapis.com/oauth2/v3/userinfo',
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+  try {
+    const googleResponse = await axios.get(
+      'https://www.googleapis.com/oauth2/v3/userinfo',
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    const payload = googleResponse.data;
+
+    if (!payload?.email) {
+      return null;
     }
-  );
 
-  if (!googleResponse.ok) {
+    return {
+      googleId: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      picture: payload.picture,
+    };
+  } catch (error) {
+    console.log(
+      'Google access token userinfo error:',
+      error?.response?.data || error.message
+    );
+
     return null;
   }
-
-  const payload = await googleResponse.json();
-
-  if (!payload?.email) {
-    return null;
-  }
-
-  return {
-    googleId: payload.sub,
-    email: payload.email,
-    name: payload.name,
-    picture: payload.picture,
-  };
 };
 
 // @desc    Register user
@@ -246,6 +253,8 @@ const login = async (req, res) => {
 // @access  Public
 const googleLogin = async (req, res) => {
   try {
+    console.log('Google login body keys:', Object.keys(req.body));
+
     const { token, idToken, accessToken } = req.body;
 
     const finalIdToken = idToken || token;
@@ -258,13 +267,15 @@ const googleLogin = async (req, res) => {
 
     let googleUser = null;
 
-    try {
-      googleUser = await getGoogleUserFromIdToken(finalIdToken);
-    } catch (idTokenError) {
-      console.log(
-        'Google ID Token verification failed, trying access token:',
-        idTokenError.message
-      );
+    if (finalIdToken) {
+      try {
+        googleUser = await getGoogleUserFromIdToken(finalIdToken);
+      } catch (idTokenError) {
+        console.log(
+          'Google ID Token verification failed, trying access token:',
+          idTokenError.message
+        );
+      }
     }
 
     if (!googleUser && accessToken) {
@@ -315,7 +326,8 @@ const googleLogin = async (req, res) => {
       token: generateToken(user._id, user.role),
     });
   } catch (error) {
-    console.log('Google Login Error:', error);
+    console.log('Google Login Error Message:', error.message);
+    console.log('Google Login Full Error:', error);
 
     res.status(500).json({
       message: 'Google login failed. Please try again.',
