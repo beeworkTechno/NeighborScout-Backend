@@ -66,6 +66,66 @@ const formatUserResponse = (user) => {
   };
 };
 
+const getGoogleUserFromIdToken = async (idToken) => {
+  if (!idToken) {
+    return null;
+  }
+
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    throw new Error('Google login is not configured properly on the server.');
+  }
+
+  const ticket = await client.verifyIdToken({
+    idToken,
+    audience: process.env.GOOGLE_CLIENT_ID,
+  });
+
+  const payload = ticket.getPayload();
+
+  if (!payload?.email) {
+    return null;
+  }
+
+  return {
+    googleId: payload.sub,
+    email: payload.email,
+    name: payload.name,
+    picture: payload.picture,
+  };
+};
+
+const getGoogleUserFromAccessToken = async (accessToken) => {
+  if (!accessToken) {
+    return null;
+  }
+
+  const googleResponse = await fetch(
+    'https://www.googleapis.com/oauth2/v3/userinfo',
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  if (!googleResponse.ok) {
+    return null;
+  }
+
+  const payload = await googleResponse.json();
+
+  if (!payload?.email) {
+    return null;
+  }
+
+  return {
+    googleId: payload.sub,
+    email: payload.email,
+    name: payload.name,
+    picture: payload.picture,
+  };
+};
+
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
@@ -186,35 +246,38 @@ const login = async (req, res) => {
 // @access  Public
 const googleLogin = async (req, res) => {
   try {
-    const { token } = req.body;
+    const { token, idToken, accessToken } = req.body;
 
-    if (!token) {
+    const finalIdToken = idToken || token;
+
+    if (!finalIdToken && !accessToken) {
       return res.status(400).json({
         message: 'Google token missing. Please try again.',
       });
     }
 
-    if (!process.env.GOOGLE_CLIENT_ID) {
-      return res.status(500).json({
-        message: 'Google login is not configured properly on the server.',
+    let googleUser = null;
+
+    try {
+      googleUser = await getGoogleUserFromIdToken(finalIdToken);
+    } catch (idTokenError) {
+      console.log(
+        'Google ID Token verification failed, trying access token:',
+        idTokenError.message
+      );
+    }
+
+    if (!googleUser && accessToken) {
+      googleUser = await getGoogleUserFromAccessToken(accessToken);
+    }
+
+    if (!googleUser?.email) {
+      return res.status(401).json({
+        message: 'Invalid Google token. Please try again.',
       });
     }
 
-    const ticket = await client.verifyIdToken({
-      idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-
-    const payload = ticket.getPayload();
-
-    if (!payload?.email) {
-      return res.status(400).json({
-        message: 'Could not get email from Google account. Please try again.',
-      });
-    }
-
-    const { sub, email, name, picture } = payload;
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = googleUser.email.trim().toLowerCase();
 
     let user = await User.findOne({
       email: normalizedEmail,
@@ -222,23 +285,29 @@ const googleLogin = async (req, res) => {
 
     if (!user) {
       user = await User.create({
-        name: name || 'Google User',
+        name: googleUser.name || 'Google User',
         email: normalizedEmail,
-        avatar: picture || '',
-        googleId: sub,
+        avatar: googleUser.picture || '',
+        googleId: googleUser.googleId,
         password: '',
         role: 'personal',
       });
-    }
+    } else {
+      let changed = false;
 
-    if (user && !user.googleId) {
-      user.googleId = sub;
-
-      if (!user.avatar && picture) {
-        user.avatar = picture;
+      if (!user.googleId && googleUser.googleId) {
+        user.googleId = googleUser.googleId;
+        changed = true;
       }
 
-      await user.save();
+      if (!user.avatar && googleUser.picture) {
+        user.avatar = googleUser.picture;
+        changed = true;
+      }
+
+      if (changed) {
+        await user.save();
+      }
     }
 
     res.json({
