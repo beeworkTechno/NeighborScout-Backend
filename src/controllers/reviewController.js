@@ -1,6 +1,24 @@
 const Review = require('../models/Review');
 const Business = require('../models/Business');
 
+const MAX_REVIEW_IMAGES = 5;
+
+const getReviewImageUrls = (review) => {
+  const imageCount = Array.isArray(review.images) ? review.images.length : 0;
+
+  return Array.from(
+    { length: imageCount },
+    (_, index) => `/api/reviews/${review._id}/images/${index}`
+  );
+};
+
+const getUploadedReviewImages = (files = []) => {
+  return files.slice(0, MAX_REVIEW_IMAGES).map((file) => ({
+    data: file.buffer,
+    contentType: file.mimetype,
+  }));
+};
+
 const formatReviewResponse = (review, currentUser = null) => {
   const reviewUserId = review.user?._id
     ? review.user._id.toString()
@@ -17,25 +35,21 @@ const formatReviewResponse = (review, currentUser = null) => {
     pseudoName: review.pseudoName || 'Anonymous Neighbor',
     rating: review.rating,
     comment: review.comment,
+    imageUrls: getReviewImageUrls(review),
+    imageCount: Array.isArray(review.images) ? review.images.length : 0,
     createdAt: review.createdAt,
     updatedAt: review.updatedAt,
-
-    // Safe frontend permissions.
-    // Real user identity is still not exposed.
     canEdit: Boolean(isOwner && currentUser?.role !== 'business'),
     canDelete: Boolean(isOwner && currentUser?.role !== 'business'),
   };
 };
 
-// @desc    Get reviews for a business
-// @route   GET /api/reviews/:businessId
-// @access  Public, with optional user permissions
 const getReviews = async (req, res) => {
   try {
     const reviews = await Review.find({
       business: req.params.businessId,
     })
-      .select('+user')
+      .select('+user -images.data')
       .sort({
         createdAt: -1,
       });
@@ -54,9 +68,6 @@ const getReviews = async (req, res) => {
   }
 };
 
-// @desc    Create a review
-// @route   POST /api/reviews/:businessId
-// @access  Private personal users only
 const createReview = async (req, res) => {
   try {
     if (req.user.role === 'business') {
@@ -91,7 +102,7 @@ const createReview = async (req, res) => {
     const existing = await Review.findOne({
       business: businessId,
       user: req.user._id,
-    }).select('+user');
+    }).select('+user -images.data');
 
     if (existing) {
       return res.status(400).json({
@@ -104,9 +115,12 @@ const createReview = async (req, res) => {
       user: req.user._id,
       rating: numericRating,
       comment: comment?.trim() || '',
+      images: getUploadedReviewImages(req.files),
     });
 
-    const fullReview = await Review.findById(review._id).select('+user');
+    const fullReview = await Review.findById(review._id).select(
+      '+user -images.data'
+    );
 
     res.status(201).json(formatReviewResponse(fullReview, req.user));
   } catch (error) {
@@ -124,9 +138,6 @@ const createReview = async (req, res) => {
   }
 };
 
-// @desc    Update a review
-// @route   PUT /api/reviews/:id
-// @access  Private personal review owner only
 const updateReview = async (req, res) => {
   try {
     if (req.user.role === 'business') {
@@ -135,7 +146,9 @@ const updateReview = async (req, res) => {
       });
     }
 
-    const review = await Review.findById(req.params.id).select('+user');
+    const review = await Review.findById(req.params.id).select(
+      '+user -images.data'
+    );
 
     if (!review) {
       return res.status(404).json({
@@ -171,9 +184,19 @@ const updateReview = async (req, res) => {
       review.comment = comment.trim();
     }
 
+    if (req.body.removeImages === 'true') {
+      review.images = [];
+    }
+
+    if (req.files && req.files.length > 0) {
+      review.images = getUploadedReviewImages(req.files);
+    }
+
     await review.save();
 
-    const updatedReview = await Review.findById(review._id).select('+user');
+    const updatedReview = await Review.findById(review._id).select(
+      '+user -images.data'
+    );
 
     res.json(formatReviewResponse(updatedReview, req.user));
   } catch (error) {
@@ -185,9 +208,37 @@ const updateReview = async (req, res) => {
   }
 };
 
-// @desc    Delete a review
-// @route   DELETE /api/reviews/:id
-// @access  Private personal review owner only
+const getReviewImage = async (req, res) => {
+  try {
+    const review = await Review.findById(req.params.id).select('images');
+    const imageIndex = Number(req.params.imageIndex);
+
+    if (
+      !review ||
+      Number.isNaN(imageIndex) ||
+      imageIndex < 0 ||
+      !review.images ||
+      !review.images[imageIndex] ||
+      !review.images[imageIndex].data
+    ) {
+      return res.status(404).json({
+        message: 'Review image not found.',
+      });
+    }
+
+    const image = review.images[imageIndex];
+
+    res.set('Content-Type', image.contentType || 'image/jpeg');
+    res.send(image.data);
+  } catch (error) {
+    console.log('Get Review Image Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to load review image.',
+    });
+  }
+};
+
 const deleteReview = async (req, res) => {
   try {
     if (req.user.role === 'business') {
@@ -196,7 +247,9 @@ const deleteReview = async (req, res) => {
       });
     }
 
-    const review = await Review.findById(req.params.id).select('+user');
+    const review = await Review.findById(req.params.id).select(
+      '+user -images.data'
+    );
 
     if (!review) {
       return res.status(404).json({
@@ -230,5 +283,6 @@ module.exports = {
   getReviews,
   createReview,
   updateReview,
+  getReviewImage,
   deleteReview,
 };
