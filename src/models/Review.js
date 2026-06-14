@@ -40,6 +40,60 @@ const generatePseudoName = () => {
   return `${adjective} ${noun} ${number}`;
 };
 
+const reviewReportSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    reason: {
+      type: String,
+      enum: [
+        "inappropriate",
+        "spam",
+        "harassment",
+        "false_information",
+        "other",
+      ],
+      default: "inappropriate",
+    },
+
+    details: {
+      type: String,
+      default: "",
+      maxlength: 500,
+    },
+
+    status: {
+      type: String,
+      enum: ["pending", "verified", "dismissed"],
+      default: "pending",
+    },
+
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    reviewedAt: {
+      type: Date,
+      default: null,
+    },
+
+    adminNote: {
+      type: String,
+      default: "",
+      maxlength: 500,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
 const reviewSchema = new mongoose.Schema(
   {
     business: {
@@ -95,6 +149,34 @@ const reviewSchema = new mongoose.Schema(
         select: false,
       },
     ],
+
+    reports: {
+      type: [reviewReportSchema],
+      default: [],
+      select: false,
+    },
+
+    moderationStatus: {
+      type: String,
+      enum: ["active", "hidden"],
+      default: "active",
+    },
+
+    hiddenReason: {
+      type: String,
+      default: "",
+    },
+
+    hiddenBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    hiddenAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -118,6 +200,9 @@ const updateBusinessRating = async (businessId, ReviewModel) => {
     {
       $match: {
         business: businessId,
+        moderationStatus: {
+          $ne: "hidden",
+        },
       },
     },
     {

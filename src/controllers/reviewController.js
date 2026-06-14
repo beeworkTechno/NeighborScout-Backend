@@ -4,6 +4,26 @@ const { containsBlockedWords } = require("../utils/reviewFilter");
 
 const MAX_REVIEW_IMAGES = 5;
 
+const SUPER_ADMIN_ROLES = ["superadmin", "super-admin", "super_admin"];
+
+const isSuperAdmin = (user) => {
+  return Boolean(user && SUPER_ADMIN_ROLES.includes(user.role));
+};
+
+const getReviewOwnerRole = (review) => {
+  if (review.user && typeof review.user === "object" && review.user.role) {
+    return review.user.role;
+  }
+
+  return null;
+};
+
+const getReportUserId = (report) => {
+  return report.user?._id
+    ? report.user._id.toString()
+    : report.user?.toString();
+};
+
 const getReviewImageUrls = (review) => {
   const imageCount = Array.isArray(review.images) ? review.images.length : 0;
 
@@ -28,7 +48,9 @@ const getUserReaction = (review, currentUser = null) => {
   }
 
   const likedBy = Array.isArray(review.likedBy) ? review.likedBy : [];
-  const dislikedBy = Array.isArray(review.dislikedBy) ? review.dislikedBy : [];
+  const dislikedBy = Array.isArray(review.dislikedBy)
+    ? review.dislikedBy
+    : [];
 
   const hasLiked = likedBy.some((userId) => {
     return userId.toString() === currentUserId;
@@ -44,18 +66,36 @@ const getUserReaction = (review, currentUser = null) => {
   return null;
 };
 
-const formatReviewResponse = (review, currentUser = null) => {
-  const reviewUserId = review.user?._id
-    ? review.user._id.toString()
-    : review.user?.toString();
+const getReviewUserId = (review) => {
+  if (review.user?._id) {
+    return review.user._id.toString();
+  }
 
+  if (review.user) {
+    return review.user.toString();
+  }
+
+  return null;
+};
+
+const formatReviewResponse = (review, currentUser = null) => {
+  const reviewUserId = getReviewUserId(review);
   const currentUserId = currentUser?._id?.toString();
 
   const isOwner =
     reviewUserId && currentUserId && reviewUserId === currentUserId;
 
   const likedBy = Array.isArray(review.likedBy) ? review.likedBy : [];
-  const dislikedBy = Array.isArray(review.dislikedBy) ? review.dislikedBy : [];
+  const dislikedBy = Array.isArray(review.dislikedBy)
+    ? review.dislikedBy
+    : [];
+  const reports = Array.isArray(review.reports) ? review.reports : [];
+
+  const reviewOwnerRole = getReviewOwnerRole(review);
+
+  const hasReported = reports.some((report) => {
+    return getReportUserId(report) === currentUserId;
+  });
 
   return {
     _id: review._id,
@@ -65,19 +105,36 @@ const formatReviewResponse = (review, currentUser = null) => {
     comment: review.comment,
     imageUrls: getReviewImageUrls(review),
     imageCount: Array.isArray(review.images) ? review.images.length : 0,
+
     likeCount: likedBy.length,
     dislikeCount: dislikedBy.length,
     myReaction: getUserReaction(review, currentUser),
+
+    reportedByMe: hasReported,
+
     createdAt: review.createdAt,
     updatedAt: review.updatedAt,
+
     canEdit: Boolean(isOwner && currentUser?.role !== "business"),
     canDelete: Boolean(isOwner && currentUser?.role !== "business"),
+
     canReact: Boolean(
       currentUser &&
-        currentUser.role !== "business" &&
+        currentUser.role === "personal" &&
+        reviewOwnerRole === "personal" &&
         reviewUserId &&
         currentUserId &&
         reviewUserId !== currentUserId
+    ),
+
+    canReport: Boolean(
+      currentUser &&
+        currentUser.role === "personal" &&
+        reviewOwnerRole === "personal" &&
+        reviewUserId &&
+        currentUserId &&
+        reviewUserId !== currentUserId &&
+        !hasReported
     ),
   };
 };
@@ -86,8 +143,12 @@ const getReviews = async (req, res) => {
   try {
     const reviews = await Review.find({
       business: req.params.businessId,
+      moderationStatus: {
+        $ne: "hidden",
+      },
     })
-      .select("+user +likedBy +dislikedBy -images.data")
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "role")
       .sort({
         createdAt: -1,
       });
@@ -164,11 +225,13 @@ const createReview = async (req, res) => {
       images: getUploadedReviewImages(req.files),
       likedBy: [],
       dislikedBy: [],
+      reports: [],
+      moderationStatus: "active",
     });
 
-    const fullReview = await Review.findById(review._id).select(
-      "+user +likedBy +dislikedBy -images.data"
-    );
+    const fullReview = await Review.findById(review._id)
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "role");
 
     res.status(201).json(formatReviewResponse(fullReview, req.user));
   } catch (error) {
@@ -195,10 +258,10 @@ const updateReview = async (req, res) => {
     }
 
     const review = await Review.findById(req.params.id).select(
-      "+user +likedBy +dislikedBy -images.data"
+      "+user +likedBy +dislikedBy +reports -images.data"
     );
 
-    if (!review) {
+    if (!review || review.moderationStatus === "hidden") {
       return res.status(404).json({
         message: "Review not found.",
       });
@@ -251,9 +314,9 @@ const updateReview = async (req, res) => {
 
     await review.save();
 
-    const updatedReview = await Review.findById(review._id).select(
-      "+user +likedBy +dislikedBy -images.data"
-    );
+    const updatedReview = await Review.findById(review._id)
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "role");
 
     res.json(formatReviewResponse(updatedReview, req.user));
   } catch (error) {
@@ -267,9 +330,9 @@ const updateReview = async (req, res) => {
 
 const reactToReview = async (req, res) => {
   try {
-    if (req.user.role === "business") {
+    if (req.user.role !== "personal") {
       return res.status(403).json({
-        message: "Business accounts cannot like or dislike reviews.",
+        message: "Only personal users can like or dislike reviews.",
       });
     }
 
@@ -281,22 +344,28 @@ const reactToReview = async (req, res) => {
       });
     }
 
-    const review = await Review.findById(req.params.id).select(
-      "+user +likedBy +dislikedBy -images.data"
-    );
+    const review = await Review.findById(req.params.id)
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "role");
 
-    if (!review) {
+    if (!review || review.moderationStatus === "hidden") {
       return res.status(404).json({
         message: "Review not found.",
       });
     }
 
-    const reviewOwnerId = review.user.toString();
+    const reviewOwnerId = getReviewUserId(review);
     const currentUserId = req.user._id.toString();
 
     if (reviewOwnerId === currentUserId) {
       return res.status(403).json({
         message: "You cannot like or dislike your own review.",
+      });
+    }
+
+    if (review.user?.role !== "personal") {
+      return res.status(403).json({
+        message: "You can only react to reviews posted by personal users.",
       });
     }
 
@@ -327,21 +396,11 @@ const reactToReview = async (req, res) => {
       review.dislikedBy.push(req.user._id);
     }
 
-    if (reaction === "none") {
-      review.likedBy = review.likedBy.filter((userId) => {
-        return userId.toString() !== currentUserId;
-      });
-
-      review.dislikedBy = review.dislikedBy.filter((userId) => {
-        return userId.toString() !== currentUserId;
-      });
-    }
-
     await review.save();
 
-    const updatedReview = await Review.findById(review._id).select(
-      "+user +likedBy +dislikedBy -images.data"
-    );
+    const updatedReview = await Review.findById(review._id)
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "role");
 
     res.json(formatReviewResponse(updatedReview, req.user));
   } catch (error) {
@@ -353,6 +412,237 @@ const reactToReview = async (req, res) => {
   }
 };
 
+const reportReview = async (req, res) => {
+  try {
+    if (req.user.role !== "personal") {
+      return res.status(403).json({
+        message: "Only personal users can report reviews.",
+      });
+    }
+
+    const allowedReasons = [
+      "inappropriate",
+      "spam",
+      "harassment",
+      "false_information",
+      "other",
+    ];
+
+    const reason = allowedReasons.includes(req.body.reason)
+      ? req.body.reason
+      : "inappropriate";
+
+    const details = req.body.details?.trim() || "";
+
+    if (details.length > 500) {
+      return res.status(400).json({
+        message: "Report details must be 500 characters or less.",
+      });
+    }
+
+    const review = await Review.findById(req.params.id)
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "role");
+
+    if (!review || review.moderationStatus === "hidden") {
+      return res.status(404).json({
+        message: "Review not found.",
+      });
+    }
+
+    const reviewOwnerId = getReviewUserId(review);
+    const currentUserId = req.user._id.toString();
+
+    if (reviewOwnerId === currentUserId) {
+      return res.status(403).json({
+        message: "You cannot report your own review.",
+      });
+    }
+
+    if (review.user?.role !== "personal") {
+      return res.status(403).json({
+        message: "You can only report reviews posted by personal users.",
+      });
+    }
+
+    review.reports = review.reports || [];
+
+    const alreadyReported = review.reports.some((report) => {
+      return getReportUserId(report) === currentUserId;
+    });
+
+    if (alreadyReported) {
+      return res.status(400).json({
+        message: "You have already reported this review.",
+      });
+    }
+
+    review.reports.push({
+      user: req.user._id,
+      reason,
+      details,
+      status: "pending",
+    });
+
+    await review.save();
+
+    const updatedReview = await Review.findById(review._id)
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "role");
+
+    res.json({
+      message: "Review reported successfully. A super admin will verify it.",
+      review: formatReviewResponse(updatedReview, req.user),
+    });
+  } catch (error) {
+    console.log("Report Review Error:", error);
+
+    res.status(500).json({
+      message: "Failed to report review.",
+    });
+  }
+};
+
+const getReportedReviews = async (req, res) => {
+  try {
+    if (!isSuperAdmin(req.user)) {
+      return res.status(403).json({
+        message: "Only super admins can view reported reviews.",
+      });
+    }
+
+    const status = req.query.status || "pending";
+
+    const query =
+      status === "all"
+        ? {
+            "reports.0": {
+              $exists: true,
+            },
+          }
+        : {
+            reports: {
+              $elemMatch: {
+                status,
+              },
+            },
+          };
+
+    const reviews = await Review.find(query)
+      .select("+user +likedBy +dislikedBy +reports -images.data")
+      .populate("user", "name email role")
+      .populate("business", "name category address")
+      .sort({
+        updatedAt: -1,
+      });
+
+    const results = reviews.map((review) => ({
+      _id: review._id,
+      business: review.business,
+      reviewUser: review.user,
+      pseudoName: review.pseudoName || "Anonymous Neighbor",
+      rating: review.rating,
+      comment: review.comment,
+      imageUrls: getReviewImageUrls(review),
+      imageCount: Array.isArray(review.images) ? review.images.length : 0,
+      likeCount: review.likedBy?.length || 0,
+      dislikeCount: review.dislikedBy?.length || 0,
+      moderationStatus: review.moderationStatus,
+      hiddenReason: review.hiddenReason,
+      hiddenAt: review.hiddenAt,
+      reports: review.reports,
+      createdAt: review.createdAt,
+      updatedAt: review.updatedAt,
+    }));
+
+    res.json(results);
+  } catch (error) {
+    console.log("Get Reported Reviews Error:", error);
+
+    res.status(500).json({
+      message: "Failed to load reported reviews.",
+    });
+  }
+};
+
+const verifyReviewReport = async (req, res) => {
+  try {
+    if (!isSuperAdmin(req.user)) {
+      return res.status(403).json({
+        message: "Only super admins can verify reported reviews.",
+      });
+    }
+
+    const { reviewId, reportId } = req.params;
+    const { action, adminNote } = req.body;
+
+    const allowedActions = ["verify", "dismiss", "hide_review"];
+
+    if (!allowedActions.includes(action)) {
+      return res.status(400).json({
+        message: "Action must be verify, dismiss, or hide_review.",
+      });
+    }
+
+    const review = await Review.findById(reviewId).select(
+      "+user +likedBy +dislikedBy +reports -images.data"
+    );
+
+    if (!review) {
+      return res.status(404).json({
+        message: "Review not found.",
+      });
+    }
+
+    const report = review.reports.id(reportId);
+
+    if (!report) {
+      return res.status(404).json({
+        message: "Report not found.",
+      });
+    }
+
+    report.adminNote = adminNote?.trim() || "";
+    report.reviewedBy = req.user._id;
+    report.reviewedAt = new Date();
+
+    if (action === "dismiss") {
+      report.status = "dismissed";
+
+      await review.save();
+
+      return res.json({
+        message: "Report dismissed successfully.",
+      });
+    }
+
+    report.status = "verified";
+
+    if (action === "hide_review") {
+      review.moderationStatus = "hidden";
+      review.hiddenReason =
+        adminNote?.trim() || "Hidden after verified report.";
+      review.hiddenBy = req.user._id;
+      review.hiddenAt = new Date();
+    }
+
+    await review.save();
+
+    res.json({
+      message:
+        action === "hide_review"
+          ? "Report verified and review hidden."
+          : "Report verified successfully.",
+    });
+  } catch (error) {
+    console.log("Verify Review Report Error:", error);
+
+    res.status(500).json({
+      message: "Failed to verify report.",
+    });
+  }
+};
+
 const getReviewImage = async (req, res) => {
   try {
     const review = await Review.findById(req.params.id).select("images");
@@ -360,6 +650,7 @@ const getReviewImage = async (req, res) => {
 
     if (
       !review ||
+      review.moderationStatus === "hidden" ||
       Number.isNaN(imageIndex) ||
       imageIndex < 0 ||
       !review.images ||
@@ -393,7 +684,7 @@ const deleteReview = async (req, res) => {
     }
 
     const review = await Review.findById(req.params.id).select(
-      "+user +likedBy +dislikedBy -images.data"
+      "+user +likedBy +dislikedBy +reports -images.data"
     );
 
     if (!review) {
@@ -429,6 +720,9 @@ module.exports = {
   createReview,
   updateReview,
   reactToReview,
+  reportReview,
+  getReportedReviews,
+  verifyReviewReport,
   getReviewImage,
   deleteReview,
 };
