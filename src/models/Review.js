@@ -1,32 +1,32 @@
-const mongoose = require('mongoose');
-const crypto = require('crypto');
+const mongoose = require("mongoose");
+const crypto = require("crypto");
 
 const pseudoAdjectives = [
-  'Helpful',
-  'Honest',
-  'Local',
-  'Trusted',
-  'Friendly',
-  'Careful',
-  'Kind',
-  'Bright',
-  'Fair',
-  'Calm',
-  'Curious',
-  'Reliable',
+  "Helpful",
+  "Honest",
+  "Local",
+  "Trusted",
+  "Friendly",
+  "Careful",
+  "Kind",
+  "Bright",
+  "Fair",
+  "Calm",
+  "Curious",
+  "Reliable",
 ];
 
 const pseudoNouns = [
-  'Neighbor',
-  'Reviewer',
-  'Customer',
-  'Visitor',
-  'Explorer',
-  'Scout',
-  'Resident',
-  'Guest',
-  'User',
-  'Friend',
+  "Neighbor",
+  "Reviewer",
+  "Customer",
+  "Visitor",
+  "Explorer",
+  "Scout",
+  "Resident",
+  "Guest",
+  "User",
+  "Friend",
 ];
 
 const generatePseudoName = () => {
@@ -44,13 +44,13 @@ const reviewSchema = new mongoose.Schema(
   {
     business: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Business',
+      ref: "Business",
       required: true,
     },
 
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
       select: false,
     },
@@ -62,14 +62,14 @@ const reviewSchema = new mongoose.Schema(
 
     rating: {
       type: Number,
-      required: [true, 'Rating is required'],
+      required: [true, "Rating is required"],
       min: 1,
       max: 5,
     },
 
     comment: {
       type: String,
-      default: '',
+      default: "",
       maxlength: 1000,
     },
 
@@ -96,7 +96,7 @@ reviewSchema.index(
 );
 
 const updateBusinessRating = async (businessId, ReviewModel) => {
-  const Business = require('./Business');
+  const Business = require("./Business");
 
   const stats = await ReviewModel.aggregate([
     {
@@ -106,9 +106,9 @@ const updateBusinessRating = async (businessId, ReviewModel) => {
     },
     {
       $group: {
-        _id: '$business',
+        _id: "$business",
         avgRating: {
-          $avg: '$rating',
+          $avg: "$rating",
         },
         count: {
           $sum: 1,
@@ -124,14 +124,14 @@ const updateBusinessRating = async (businessId, ReviewModel) => {
   });
 };
 
-reviewSchema.post('save', async function () {
+reviewSchema.post("save", async function () {
   await updateBusinessRating(this.business, this.constructor);
 });
 
-reviewSchema.post('findOneAndDelete', async function (doc) {
+reviewSchema.post("findOneAndDelete", async function (doc) {
   if (doc) {
     await updateBusinessRating(doc.business, doc.constructor);
   }
 });
 
-module.exports = mongoose.model('Review', reviewSchema);
+module.exports = mongoose.model("Review", reviewSchema);

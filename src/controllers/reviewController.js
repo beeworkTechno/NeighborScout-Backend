@@ -1,5 +1,6 @@
-const Review = require('../models/Review');
-const Business = require('../models/Business');
+const Review = require("../models/Review");
+const Business = require("../models/Business");
+const { containsBlockedWords } = require("../utils/reviewFilter");
 
 const MAX_REVIEW_IMAGES = 5;
 
@@ -32,15 +33,15 @@ const formatReviewResponse = (review, currentUser = null) => {
   return {
     _id: review._id,
     business: review.business,
-    pseudoName: review.pseudoName || 'Anonymous Neighbor',
+    pseudoName: review.pseudoName || "Anonymous Neighbor",
     rating: review.rating,
     comment: review.comment,
     imageUrls: getReviewImageUrls(review),
     imageCount: Array.isArray(review.images) ? review.images.length : 0,
     createdAt: review.createdAt,
     updatedAt: review.updatedAt,
-    canEdit: Boolean(isOwner && currentUser?.role !== 'business'),
-    canDelete: Boolean(isOwner && currentUser?.role !== 'business'),
+    canEdit: Boolean(isOwner && currentUser?.role !== "business"),
+    canDelete: Boolean(isOwner && currentUser?.role !== "business"),
   };
 };
 
@@ -49,7 +50,7 @@ const getReviews = async (req, res) => {
     const reviews = await Review.find({
       business: req.params.businessId,
     })
-      .select('+user -images.data')
+      .select("+user -images.data")
       .sort({
         createdAt: -1,
       });
@@ -60,24 +61,32 @@ const getReviews = async (req, res) => {
 
     res.json(safeReviews);
   } catch (error) {
-    console.log('Get Reviews Error:', error);
+    console.log("Get Reviews Error:", error);
 
     res.status(500).json({
-      message: 'Failed to load reviews.',
+      message: "Failed to load reviews.",
     });
   }
 };
 
 const createReview = async (req, res) => {
   try {
-    if (req.user.role === 'business') {
+    if (req.user.role === "business") {
       return res.status(403).json({
-        message: 'Business accounts cannot rate or review businesses.',
+        message: "Business accounts cannot rate or review businesses.",
       });
     }
 
     const { rating, comment } = req.body;
     const businessId = req.params.businessId;
+    const cleanComment = comment?.trim() || "";
+
+    if (containsBlockedWords(cleanComment)) {
+      return res.status(400).json({
+        message:
+          "Your review contains inappropriate language. Please edit it and try again.",
+      });
+    }
 
     const numericRating = Number(rating);
 
@@ -87,7 +96,7 @@ const createReview = async (req, res) => {
       numericRating > 5
     ) {
       return res.status(400).json({
-        message: 'Rating must be between 1 and 5.',
+        message: "Rating must be between 1 and 5.",
       });
     }
 
@@ -95,18 +104,18 @@ const createReview = async (req, res) => {
 
     if (!business) {
       return res.status(404).json({
-        message: 'Business not found.',
+        message: "Business not found.",
       });
     }
 
     const existing = await Review.findOne({
       business: businessId,
       user: req.user._id,
-    }).select('+user -images.data');
+    }).select("+user -images.data");
 
     if (existing) {
       return res.status(400).json({
-        message: 'You have already reviewed this business.',
+        message: "You have already reviewed this business.",
       });
     }
 
@@ -114,51 +123,51 @@ const createReview = async (req, res) => {
       business: businessId,
       user: req.user._id,
       rating: numericRating,
-      comment: comment?.trim() || '',
+      comment: cleanComment,
       images: getUploadedReviewImages(req.files),
     });
 
     const fullReview = await Review.findById(review._id).select(
-      '+user -images.data'
+      "+user -images.data"
     );
 
     res.status(201).json(formatReviewResponse(fullReview, req.user));
   } catch (error) {
-    console.log('Create Review Error:', error);
+    console.log("Create Review Error:", error);
 
     if (error.code === 11000) {
       return res.status(400).json({
-        message: 'You have already reviewed this business.',
+        message: "You have already reviewed this business.",
       });
     }
 
     res.status(500).json({
-      message: 'Failed to create review.',
+      message: "Failed to create review.",
     });
   }
 };
 
 const updateReview = async (req, res) => {
   try {
-    if (req.user.role === 'business') {
+    if (req.user.role === "business") {
       return res.status(403).json({
-        message: 'Business accounts cannot update reviews or ratings.',
+        message: "Business accounts cannot update reviews or ratings.",
       });
     }
 
     const review = await Review.findById(req.params.id).select(
-      '+user -images.data'
+      "+user -images.data"
     );
 
     if (!review) {
       return res.status(404).json({
-        message: 'Review not found.',
+        message: "Review not found.",
       });
     }
 
     if (review.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({
-        message: 'You can only update your own review.',
+        message: "You can only update your own review.",
       });
     }
 
@@ -173,7 +182,7 @@ const updateReview = async (req, res) => {
         numericRating > 5
       ) {
         return res.status(400).json({
-          message: 'Rating must be between 1 and 5.',
+          message: "Rating must be between 1 and 5.",
         });
       }
 
@@ -181,10 +190,19 @@ const updateReview = async (req, res) => {
     }
 
     if (comment !== undefined) {
-      review.comment = comment.trim();
+      const cleanComment = comment.trim();
+
+      if (containsBlockedWords(cleanComment)) {
+        return res.status(400).json({
+          message:
+            "Your review contains inappropriate language. Please edit it and try again.",
+        });
+      }
+
+      review.comment = cleanComment;
     }
 
-    if (req.body.removeImages === 'true') {
+    if (req.body.removeImages === "true") {
       review.images = [];
     }
 
@@ -195,22 +213,22 @@ const updateReview = async (req, res) => {
     await review.save();
 
     const updatedReview = await Review.findById(review._id).select(
-      '+user -images.data'
+      "+user -images.data"
     );
 
     res.json(formatReviewResponse(updatedReview, req.user));
   } catch (error) {
-    console.log('Update Review Error:', error);
+    console.log("Update Review Error:", error);
 
     res.status(500).json({
-      message: 'Failed to update review.',
+      message: "Failed to update review.",
     });
   }
 };
 
 const getReviewImage = async (req, res) => {
   try {
-    const review = await Review.findById(req.params.id).select('images');
+    const review = await Review.findById(req.params.id).select("images");
     const imageIndex = Number(req.params.imageIndex);
 
     if (
@@ -222,44 +240,44 @@ const getReviewImage = async (req, res) => {
       !review.images[imageIndex].data
     ) {
       return res.status(404).json({
-        message: 'Review image not found.',
+        message: "Review image not found.",
       });
     }
 
     const image = review.images[imageIndex];
 
-    res.set('Content-Type', image.contentType || 'image/jpeg');
+    res.set("Content-Type", image.contentType || "image/jpeg");
     res.send(image.data);
   } catch (error) {
-    console.log('Get Review Image Error:', error);
+    console.log("Get Review Image Error:", error);
 
     res.status(500).json({
-      message: 'Failed to load review image.',
+      message: "Failed to load review image.",
     });
   }
 };
 
 const deleteReview = async (req, res) => {
   try {
-    if (req.user.role === 'business') {
+    if (req.user.role === "business") {
       return res.status(403).json({
-        message: 'Business accounts cannot delete reviews or ratings.',
+        message: "Business accounts cannot delete reviews or ratings.",
       });
     }
 
     const review = await Review.findById(req.params.id).select(
-      '+user -images.data'
+      "+user -images.data"
     );
 
     if (!review) {
       return res.status(404).json({
-        message: 'Review not found.',
+        message: "Review not found.",
       });
     }
 
     if (review.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({
-        message: 'You can only delete your own review.',
+        message: "You can only delete your own review.",
       });
     }
 
@@ -268,13 +286,13 @@ const deleteReview = async (req, res) => {
     });
 
     res.json({
-      message: 'Review removed.',
+      message: "Review removed.",
     });
   } catch (error) {
-    console.log('Delete Review Error:', error);
+    console.log("Delete Review Error:", error);
 
     res.status(500).json({
-      message: 'Failed to delete review.',
+      message: "Failed to delete review.",
     });
   }
 };
