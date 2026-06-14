@@ -1,6 +1,25 @@
 const Business = require('../models/Business');
+const { reverseGeocodeCoordinates } = require('../utils/reverseGeocode');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8081';
+
+const isMissingAddress = (address = '') => {
+  const value = String(address || '').trim().toLowerCase();
+
+  return (
+    !value ||
+    value === 'address not provided' ||
+    value === 'not provided' ||
+    value === 'n/a'
+  );
+};
+
+const isSuperAdmin = (user) => {
+  return Boolean(
+    user &&
+      ['superadmin', 'super-admin', 'super_admin'].includes(user.role)
+  );
+};
 
 const addBusinessPageUrl = (business) => {
   if (!business) return business;
@@ -69,6 +88,32 @@ const isValidCoordinates = (longitude, latitude) => {
     longitude >= -180 &&
     longitude <= 180
   );
+};
+
+const getAddressFromCoordinates = async (latitude, longitude) => {
+  const generatedAddress = await reverseGeocodeCoordinates(latitude, longitude);
+
+  return generatedAddress || 'Address not provided';
+};
+
+const getBusinessCoordinates = (business) => {
+  if (
+    business?.location?.coordinates &&
+    Array.isArray(business.location.coordinates) &&
+    business.location.coordinates.length === 2
+  ) {
+    const longitude = Number(business.location.coordinates[0]);
+    const latitude = Number(business.location.coordinates[1]);
+
+    if (isValidCoordinates(longitude, latitude)) {
+      return {
+        longitude,
+        latitude,
+      };
+    }
+  }
+
+  return null;
 };
 
 // @desc    Get all businesses with optional filters
@@ -257,11 +302,17 @@ const createBusiness = async (req, res) => {
       });
     }
 
+    let finalAddress = address?.trim() || '';
+
+    if (isMissingAddress(finalAddress)) {
+      finalAddress = await getAddressFromCoordinates(latitude, longitude);
+    }
+
     const businessData = {
       name: name.trim(),
       description: description.trim(),
       category: category.trim(),
-      address: address?.trim() || 'Address not provided',
+      address: finalAddress,
       phone: phone?.trim() || '',
       location: {
         type: 'Point',
@@ -312,6 +363,8 @@ const updateBusiness = async (req, res) => {
       });
     }
 
+    const parsedLocation = parseLocationFromBody(req.body);
+
     if (req.body.name) {
       business.name = req.body.name.trim();
     }
@@ -324,10 +377,6 @@ const updateBusiness = async (req, res) => {
       business.category = req.body.category.trim();
     }
 
-    if (req.body.address) {
-      business.address = req.body.address.trim();
-    }
-
     if (req.body.phone !== undefined) {
       business.phone = req.body.phone.trim();
     }
@@ -338,8 +387,6 @@ const updateBusiness = async (req, res) => {
         contentType: req.file.mimetype,
       };
     }
-
-    const parsedLocation = parseLocationFromBody(req.body);
 
     if (parsedLocation) {
       const { longitude, latitude } = parsedLocation;
@@ -356,6 +403,26 @@ const updateBusiness = async (req, res) => {
       };
     }
 
+    const currentCoordinates = parsedLocation || getBusinessCoordinates(business);
+
+    if (req.body.address !== undefined) {
+      const requestedAddress = req.body.address.trim();
+
+      if (isMissingAddress(requestedAddress) && currentCoordinates) {
+        business.address = await getAddressFromCoordinates(
+          currentCoordinates.latitude,
+          currentCoordinates.longitude
+        );
+      } else {
+        business.address = requestedAddress || 'Address not provided';
+      }
+    } else if (isMissingAddress(business.address) && currentCoordinates) {
+      business.address = await getAddressFromCoordinates(
+        currentCoordinates.latitude,
+        currentCoordinates.longitude
+      );
+    }
+
     const savedBusiness = await business.save();
 
     const updated = await Business.findById(savedBusiness._id)
@@ -368,6 +435,75 @@ const updateBusiness = async (req, res) => {
 
     res.status(500).json({
       message: error.message || 'Failed to update business.',
+    });
+  }
+};
+
+// @desc    Autofill missing addresses for old businesses
+// @route   PUT /api/businesses/admin/autofill-addresses
+// @access  Superadmin only
+const autofillMissingBusinessAddresses = async (req, res) => {
+  try {
+    if (!isSuperAdmin(req.user)) {
+      return res.status(403).json({
+        message: 'Only super admins can autofill business addresses.',
+      });
+    }
+
+    const businesses = await Business.find({
+      $or: [
+        {
+          address: {
+            $exists: false,
+          },
+        },
+        {
+          address: '',
+        },
+        {
+          address: null,
+        },
+        {
+          address: 'Address not provided',
+        },
+      ],
+    });
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    for (const business of businesses) {
+      const coordinates = getBusinessCoordinates(business);
+
+      if (!coordinates) {
+        skippedCount += 1;
+        continue;
+      }
+
+      const address = await reverseGeocodeCoordinates(
+        coordinates.latitude,
+        coordinates.longitude
+      );
+
+      if (address) {
+        business.address = address;
+        await business.save();
+        updatedCount += 1;
+      } else {
+        skippedCount += 1;
+      }
+    }
+
+    res.json({
+      message: 'Missing business addresses autofilled.',
+      updatedCount,
+      skippedCount,
+    });
+  } catch (error) {
+    console.log('Autofill Business Addresses Error:', error);
+
+    res.status(500).json({
+      message: 'Failed to autofill business addresses.',
     });
   }
 };
@@ -414,5 +550,6 @@ module.exports = {
   getBusinessPhoto,
   createBusiness,
   updateBusiness,
+  autofillMissingBusinessAddresses,
   deleteBusiness,
 };

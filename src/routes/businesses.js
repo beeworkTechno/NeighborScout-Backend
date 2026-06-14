@@ -8,18 +8,30 @@ const {
   getBusinessPhoto,
   createBusiness,
   updateBusiness,
+  autofillMissingBusinessAddresses,
   deleteBusiness,
 } = require('../controllers/businessController');
 
 const { protect } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
+/*
+  IMPORTANT:
+  Keep specific routes like /my and /admin/autofill-addresses
+  above /:id routes, otherwise Express may treat "my" or "admin"
+  as a business ID.
+*/
+
+router
+  .route('/admin/autofill-addresses')
+  .put(protect, autofillMissingBusinessAddresses);
+
+router.route('/my').get(protect, getMyBusinesses);
+
 router
   .route('/')
   .get(getBusinesses)
   .post(protect, upload.single('profilePhoto'), createBusiness);
-
-router.route('/my').get(protect, getMyBusinesses);
 
 router.route('/:id/photo').get(getBusinessPhoto);
 
