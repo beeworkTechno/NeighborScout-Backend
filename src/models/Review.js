@@ -193,6 +193,14 @@ reviewSchema.index(
   }
 );
 
+reviewSchema.index({
+  moderationStatus: 1,
+});
+
+reviewSchema.index({
+  "reports.status": 1,
+});
+
 const updateBusinessRating = async (businessId, ReviewModel) => {
   const Business = require("./Business");
 

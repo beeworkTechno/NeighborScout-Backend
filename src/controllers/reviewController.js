@@ -24,6 +24,18 @@ const getReportUserId = (report) => {
     : report.user?.toString();
 };
 
+const getReviewUserId = (review) => {
+  if (review.user?._id) {
+    return review.user._id.toString();
+  }
+
+  if (review.user) {
+    return review.user.toString();
+  }
+
+  return null;
+};
+
 const getReviewImageUrls = (review) => {
   const imageCount = Array.isArray(review.images) ? review.images.length : 0;
 
@@ -62,18 +74,6 @@ const getUserReaction = (review, currentUser = null) => {
 
   if (hasLiked) return "like";
   if (hasDisliked) return "dislike";
-
-  return null;
-};
-
-const getReviewUserId = (review) => {
-  if (review.user?._id) {
-    return review.user._id.toString();
-  }
-
-  if (review.user) {
-    return review.user.toString();
-  }
 
   return null;
 };
@@ -513,20 +513,23 @@ const getReportedReviews = async (req, res) => {
 
     const status = req.query.status || "pending";
 
-    const query =
-      status === "all"
-        ? {
-            "reports.0": {
-              $exists: true,
-            },
-          }
-        : {
-            reports: {
-              $elemMatch: {
-                status,
-              },
-            },
-          };
+    let query;
+
+    if (status === "all") {
+      query = {
+        "reports.0": {
+          $exists: true,
+        },
+      };
+    } else {
+      query = {
+        reports: {
+          $elemMatch: {
+            status,
+          },
+        },
+      };
+    }
 
     const reviews = await Review.find(query)
       .select("+user +likedBy +dislikedBy +reports -images.data")
@@ -549,6 +552,7 @@ const getReportedReviews = async (req, res) => {
       dislikeCount: review.dislikedBy?.length || 0,
       moderationStatus: review.moderationStatus,
       hiddenReason: review.hiddenReason,
+      hiddenBy: review.hiddenBy,
       hiddenAt: review.hiddenAt,
       reports: review.reports,
       createdAt: review.createdAt,
@@ -576,11 +580,17 @@ const verifyReviewReport = async (req, res) => {
     const { reviewId, reportId } = req.params;
     const { action, adminNote } = req.body;
 
-    const allowedActions = ["verify", "dismiss", "hide_review"];
+    const allowedActions = [
+      "verify",
+      "dismiss",
+      "reject_review",
+      "hide_review",
+    ];
 
     if (!allowedActions.includes(action)) {
       return res.status(400).json({
-        message: "Action must be verify, dismiss, or hide_review.",
+        message:
+          "Action must be verify, dismiss, reject_review, or hide_review.",
       });
     }
 
@@ -612,28 +622,36 @@ const verifyReviewReport = async (req, res) => {
       await review.save();
 
       return res.json({
-        message: "Report dismissed successfully.",
+        message: "Report dismissed. Review remains public.",
       });
     }
 
-    report.status = "verified";
+    if (action === "verify") {
+      report.status = "verified";
 
-    if (action === "hide_review") {
-      review.moderationStatus = "hidden";
-      review.hiddenReason =
-        adminNote?.trim() || "Hidden after verified report.";
-      review.hiddenBy = req.user._id;
-      review.hiddenAt = new Date();
+      await review.save();
+
+      return res.json({
+        message: "Report verified. Review remains public until rejected.",
+      });
     }
 
-    await review.save();
+    if (action === "reject_review" || action === "hide_review") {
+      report.status = "verified";
 
-    res.json({
-      message:
-        action === "hide_review"
-          ? "Report verified and review hidden."
-          : "Report verified successfully.",
-    });
+      review.moderationStatus = "hidden";
+      review.hiddenReason =
+        adminNote?.trim() || "Review rejected by super admin.";
+      review.hiddenBy = req.user._id;
+      review.hiddenAt = new Date();
+
+      await review.save();
+
+      return res.json({
+        message:
+          "Report verified and review rejected. Review is hidden from public but kept in database.",
+      });
+    }
   } catch (error) {
     console.log("Verify Review Report Error:", error);
 
@@ -645,7 +663,10 @@ const verifyReviewReport = async (req, res) => {
 
 const getReviewImage = async (req, res) => {
   try {
-    const review = await Review.findById(req.params.id).select("images");
+    const review = await Review.findById(req.params.id).select(
+      "images moderationStatus"
+    );
+
     const imageIndex = Number(req.params.imageIndex);
 
     if (
@@ -690,6 +711,13 @@ const deleteReview = async (req, res) => {
     if (!review) {
       return res.status(404).json({
         message: "Review not found.",
+      });
+    }
+
+    if (review.moderationStatus === "hidden") {
+      return res.status(403).json({
+        message:
+          "This review has been hidden after moderation and cannot be deleted by the user.",
       });
     }
 
