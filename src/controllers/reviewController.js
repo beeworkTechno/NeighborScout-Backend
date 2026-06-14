@@ -20,6 +20,30 @@ const getUploadedReviewImages = (files = []) => {
   }));
 };
 
+const getUserReaction = (review, currentUser = null) => {
+  const currentUserId = currentUser?._id?.toString();
+
+  if (!currentUserId) {
+    return null;
+  }
+
+  const likedBy = Array.isArray(review.likedBy) ? review.likedBy : [];
+  const dislikedBy = Array.isArray(review.dislikedBy) ? review.dislikedBy : [];
+
+  const hasLiked = likedBy.some((userId) => {
+    return userId.toString() === currentUserId;
+  });
+
+  const hasDisliked = dislikedBy.some((userId) => {
+    return userId.toString() === currentUserId;
+  });
+
+  if (hasLiked) return "like";
+  if (hasDisliked) return "dislike";
+
+  return null;
+};
+
 const formatReviewResponse = (review, currentUser = null) => {
   const reviewUserId = review.user?._id
     ? review.user._id.toString()
@@ -30,6 +54,9 @@ const formatReviewResponse = (review, currentUser = null) => {
   const isOwner =
     reviewUserId && currentUserId && reviewUserId === currentUserId;
 
+  const likedBy = Array.isArray(review.likedBy) ? review.likedBy : [];
+  const dislikedBy = Array.isArray(review.dislikedBy) ? review.dislikedBy : [];
+
   return {
     _id: review._id,
     business: review.business,
@@ -38,10 +65,20 @@ const formatReviewResponse = (review, currentUser = null) => {
     comment: review.comment,
     imageUrls: getReviewImageUrls(review),
     imageCount: Array.isArray(review.images) ? review.images.length : 0,
+    likeCount: likedBy.length,
+    dislikeCount: dislikedBy.length,
+    myReaction: getUserReaction(review, currentUser),
     createdAt: review.createdAt,
     updatedAt: review.updatedAt,
     canEdit: Boolean(isOwner && currentUser?.role !== "business"),
     canDelete: Boolean(isOwner && currentUser?.role !== "business"),
+    canReact: Boolean(
+      currentUser &&
+        currentUser.role !== "business" &&
+        reviewUserId &&
+        currentUserId &&
+        reviewUserId !== currentUserId
+    ),
   };
 };
 
@@ -50,7 +87,7 @@ const getReviews = async (req, res) => {
     const reviews = await Review.find({
       business: req.params.businessId,
     })
-      .select("+user -images.data")
+      .select("+user +likedBy +dislikedBy -images.data")
       .sort({
         createdAt: -1,
       });
@@ -125,10 +162,12 @@ const createReview = async (req, res) => {
       rating: numericRating,
       comment: cleanComment,
       images: getUploadedReviewImages(req.files),
+      likedBy: [],
+      dislikedBy: [],
     });
 
     const fullReview = await Review.findById(review._id).select(
-      "+user -images.data"
+      "+user +likedBy +dislikedBy -images.data"
     );
 
     res.status(201).json(formatReviewResponse(fullReview, req.user));
@@ -156,7 +195,7 @@ const updateReview = async (req, res) => {
     }
 
     const review = await Review.findById(req.params.id).select(
-      "+user -images.data"
+      "+user +likedBy +dislikedBy -images.data"
     );
 
     if (!review) {
@@ -213,7 +252,7 @@ const updateReview = async (req, res) => {
     await review.save();
 
     const updatedReview = await Review.findById(review._id).select(
-      "+user -images.data"
+      "+user +likedBy +dislikedBy -images.data"
     );
 
     res.json(formatReviewResponse(updatedReview, req.user));
@@ -222,6 +261,94 @@ const updateReview = async (req, res) => {
 
     res.status(500).json({
       message: "Failed to update review.",
+    });
+  }
+};
+
+const reactToReview = async (req, res) => {
+  try {
+    if (req.user.role === "business") {
+      return res.status(403).json({
+        message: "Business accounts cannot like or dislike reviews.",
+      });
+    }
+
+    const { reaction } = req.body;
+
+    if (!["like", "dislike", "none"].includes(reaction)) {
+      return res.status(400).json({
+        message: "Reaction must be like, dislike, or none.",
+      });
+    }
+
+    const review = await Review.findById(req.params.id).select(
+      "+user +likedBy +dislikedBy -images.data"
+    );
+
+    if (!review) {
+      return res.status(404).json({
+        message: "Review not found.",
+      });
+    }
+
+    const reviewOwnerId = review.user.toString();
+    const currentUserId = req.user._id.toString();
+
+    if (reviewOwnerId === currentUserId) {
+      return res.status(403).json({
+        message: "You cannot like or dislike your own review.",
+      });
+    }
+
+    review.likedBy = review.likedBy || [];
+    review.dislikedBy = review.dislikedBy || [];
+
+    const alreadyLiked = review.likedBy.some((userId) => {
+      return userId.toString() === currentUserId;
+    });
+
+    const alreadyDisliked = review.dislikedBy.some((userId) => {
+      return userId.toString() === currentUserId;
+    });
+
+    review.likedBy = review.likedBy.filter((userId) => {
+      return userId.toString() !== currentUserId;
+    });
+
+    review.dislikedBy = review.dislikedBy.filter((userId) => {
+      return userId.toString() !== currentUserId;
+    });
+
+    if (reaction === "like" && !alreadyLiked) {
+      review.likedBy.push(req.user._id);
+    }
+
+    if (reaction === "dislike" && !alreadyDisliked) {
+      review.dislikedBy.push(req.user._id);
+    }
+
+    if (reaction === "none") {
+      review.likedBy = review.likedBy.filter((userId) => {
+        return userId.toString() !== currentUserId;
+      });
+
+      review.dislikedBy = review.dislikedBy.filter((userId) => {
+        return userId.toString() !== currentUserId;
+      });
+    }
+
+    await review.save();
+
+    const updatedReview = await Review.findById(review._id).select(
+      "+user +likedBy +dislikedBy -images.data"
+    );
+
+    res.json(formatReviewResponse(updatedReview, req.user));
+  } catch (error) {
+    console.log("React To Review Error:", error);
+
+    res.status(500).json({
+      message: "Failed to update review reaction.",
     });
   }
 };
@@ -266,7 +393,7 @@ const deleteReview = async (req, res) => {
     }
 
     const review = await Review.findById(req.params.id).select(
-      "+user -images.data"
+      "+user +likedBy +dislikedBy -images.data"
     );
 
     if (!review) {
@@ -301,6 +428,7 @@ module.exports = {
   getReviews,
   createReview,
   updateReview,
+  reactToReview,
   getReviewImage,
   deleteReview,
 };

@@ -79,6 +79,22 @@ const reviewSchema = new mongoose.Schema(
         contentType: String,
       },
     ],
+
+    likedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        select: false,
+      },
+    ],
+
+    dislikedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        select: false,
+      },
+    ],
   },
   {
     timestamps: true,

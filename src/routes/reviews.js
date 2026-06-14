@@ -5,6 +5,7 @@ const {
   getReviews,
   createReview,
   updateReview,
+  reactToReview,
   getReviewImage,
   deleteReview,
 } = require("../controllers/reviewController");
@@ -17,6 +18,8 @@ router
   .route("/:businessId")
   .get(optionalAuth, getReviews)
   .post(protect, upload.array("images", 5), createReview);
+
+router.route("/:id/reaction").put(protect, reactToReview);
 
 router.route("/:id/images/:imageIndex").get(getReviewImage);
 
