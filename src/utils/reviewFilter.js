@@ -1,20 +1,13 @@
-const DEFAULT_BLOCKED_WORDS = [
-  // Add default blocked words here if you want.
+const BLOCKED_WORDS = [
+  // Add vulgar/inappropriate words here.
+  // Keep them lowercase.
   // Example:
-  "Fuck",
-  // "word2",
+  "fuck",
+  "sex",
+  "shit",
+  
+  // "bad phrase",
 ];
-
-const getBlockedWords = () => {
-  const envWords = process.env.BLOCKED_REVIEW_WORDS || "";
-
-  const wordsFromEnv = envWords
-    .split(",")
-    .map((word) => word.trim().toLowerCase())
-    .filter(Boolean);
-
-  return [...DEFAULT_BLOCKED_WORDS, ...wordsFromEnv];
-};
 
 const normalizeText = (text = "") => {
   return text
@@ -26,7 +19,13 @@ const normalizeText = (text = "") => {
     .replace(/[1!|]/g, "i")
     .replace(/[0]/g, "o")
     .replace(/[5$]/g, "s")
-    .replace(/[7]/g, "t");
+    .replace(/[7]/g, "t")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const makeCompactText = (text = "") => {
+  return normalizeText(text).replace(/[^a-z0-9]/g, "");
 };
 
 const escapeRegex = (text) => {
@@ -34,24 +33,30 @@ const escapeRegex = (text) => {
 };
 
 const containsBlockedWords = (comment = "") => {
-  const blockedWords = getBlockedWords();
-
-  if (!comment || blockedWords.length === 0) {
+  if (!comment || BLOCKED_WORDS.length === 0) {
     return false;
   }
 
   const normalizedComment = normalizeText(comment);
+  const compactComment = makeCompactText(comment);
 
-  return blockedWords.some((word) => {
+  return BLOCKED_WORDS.some((word) => {
     const normalizedWord = normalizeText(word);
+    const compactWord = makeCompactText(word);
 
-    if (!normalizedWord) {
+    if (!normalizedWord || !compactWord) {
       return false;
     }
 
-    const pattern = new RegExp(`\\b${escapeRegex(normalizedWord)}\\b`, "i");
+    const wordPattern = new RegExp(
+      `(^|[^a-z0-9])${escapeRegex(normalizedWord)}([^a-z0-9]|$)`,
+      "i"
+    );
 
-    return pattern.test(normalizedComment);
+    const normalMatch = wordPattern.test(normalizedComment);
+    const compactMatch = compactComment.includes(compactWord);
+
+    return normalMatch || compactMatch;
   });
 };
 
