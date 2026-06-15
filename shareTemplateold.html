@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -43,5 +43,29 @@
       <p class="footer">If the app is installed, the link will open directly in the app. Otherwise, users can still view the business preview here.</p>
     </div>
   </div>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redirecting...</title>
+  <script>
+    // Get business ID from URL
+    const pathParts = window.location.pathname.split('/');
+    const businessId = pathParts[pathParts.length - 1];
+    
+    // Get frontend URL from your environment or use default
+const frontendUrl = 'https://beeworktechno.github.io/NeighborScout-Frontend';    
+    // Redirect to frontend business page
+    if (businessId && businessId !== 'business') {
+      window.location.href = `${frontendUrl}/business/${businessId}`;
+    }
+  </script>
+</head>
+<body>
+  <p>Redirecting to business page...</p>
 </body>
 </html>
